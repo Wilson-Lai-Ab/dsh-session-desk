@@ -2,7 +2,7 @@ import { existsSync, mkdirSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { join, dirname, basename } from 'node:path'
 import { homedir } from 'node:os'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 
 export const ELECTRON_VERSION = '31.7.7'
 
@@ -43,18 +43,38 @@ function extractZip(zipPath: string, destDir: string): void {
   if (r.status !== 0) throw new Error(`extract failed (${process.platform})`)
 }
 
+/** Stream the zip to disk with curl. Avoids Node fetch().arrayBuffer() which
+ *  materialises ~92MB in RAM and gets `terminated` on this host. */
+function downloadWithCurl(url: string, dest: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('curl', ['-fsSL', '--retry', '3', '--retry-delay', '2', '-o', dest, url], { stdio: 'ignore' })
+    child.on('error', reject)
+    child.on('exit', (code) => {
+      if (code === 0 && existsSync(dest)) resolve()
+      else reject(new Error(`electron download failed (curl ${code ?? 'killed'})`))
+    })
+  })
+}
+
 export async function ensureElectron(
   target: ElectronTarget,
-  deps?: { fetch?: typeof fetch; extractZip?: (zip: string, dest: string) => void },
+  deps?: {
+    fetch?: typeof fetch
+    extractZip?: (zip: string, dest: string) => void
+    download?: (url: string, dest: string) => Promise<void>
+  },
 ): Promise<string> {
   if (existsSync(target.exePath)) return target.exePath
-  const fetchFn = deps?.fetch ?? globalThis.fetch
-  const res = await fetchFn(target.downloadUrl)
-  if (!res.ok) throw new Error(`electron download failed: ${res.status}`)
   const cacheDir = target.cacheDir ?? dirname(target.exePath)
   mkdirSync(cacheDir, { recursive: true })
   const zipPath = join(cacheDir, `${basename(target.exePath)}.zip`)
-  await writeFile(zipPath, Buffer.from(await res.arrayBuffer()))
+  if (deps?.fetch) {
+    const res = await deps.fetch(target.downloadUrl)
+    if (!res.ok) throw new Error(`electron download failed: ${res.status}`)
+    await writeFile(zipPath, Buffer.from(await res.arrayBuffer()))
+  } else {
+    await (deps?.download ?? downloadWithCurl)(target.downloadUrl, zipPath)
+  }
   const extract = deps?.extractZip ?? extractZip
   extract(zipPath, cacheDir)
   if (!existsSync(target.exePath)) throw new Error('electron extract failed: executable not found')

@@ -237,6 +237,7 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
   const petDesktop = settings.petDesktop === true
   const [desktopActive, setDesktopActive] = useState(false)
   const [desktopDownloading, setDesktopDownloading] = useState(false)
+  const [desktopError, setDesktopError] = useState<string | null>(null)
   const lastAckRef = useRef<number | null>(null)
   const prevDesktopRef = useRef<boolean | null>(null)
 
@@ -248,11 +249,11 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
     if (!petDesktop) {
       setDesktopActive(false)
       setDesktopDownloading(false)
+      setDesktopError(null)
       lastAckRef.current = null
       return undefined
     }
     let stopped = false
-    let revertedOnFailed = false
     const poll = async (): Promise<void> => {
       if (stopped) return
       try {
@@ -266,13 +267,7 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
         }
         setDesktopActive(data.active === true)
         setDesktopDownloading(data.download?.stage === 'downloading')
-        // A definite background download failure is the clear-failure the
-        // switch must surface: revert to browser mode once so the user can
-        // retry. The revert flows through reconcile → /close (resets pending).
-        if (data.download?.stage === 'failed' && !revertedOnFailed) {
-          revertedOnFailed = true
-          void props.update?.({ petDesktop: false })
-        }
+        setDesktopError(data.download?.stage === 'failed' ? (data.download.error ?? 'download failed') : null)
         const pending = data.pendingOpen
         if (
           pending &&
@@ -313,12 +308,9 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
       void (async () => {
         try {
           const res = await fetch(`${PET_DESKTOP_PREFIX}/spawn`, { method: 'POST', headers: CSRF_HEADERS, body: '{}' })
-          if (!res.ok && !cancelled) void props.update?.({ petDesktop: false })
+          if (!res.ok && !cancelled) setDesktopError(`spawn ${res.status}`)
         } catch {
-          // A network exception is not a definite failure: only revert when
-          // the user actively switched to desktop (prev !== null), never on
-          // mount-time jitter that would clear a persisted petDesktop.
-          if (!cancelled && prev !== null) void props.update?.({ petDesktop: false })
+          /* keep last known state; /status poll surfaces download failures */
         }
       })()
     } else if (prev !== null) {
@@ -624,6 +616,11 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
           {props.t?.('pet.desktop.preparing') ?? '正在准备桌面依赖…'}
         </div>
       )}
+      {petDesktop && desktopError !== null && !desktopActive && (
+        <div className="dsd-pet__preparing" data-kind="error">
+          {props.t?.('pet.desktop.failed') ?? '桌面依赖准备失败'}
+        </div>
+      )}
       <div
         className="dsd-pet__callout"
         data-kind={kind}
@@ -777,6 +774,33 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
           )}
         </div>
       )}
+        <div className="dsd-pet__callout__modes">
+          <button
+            type="button"
+            className="dsd-pet__callout__item"
+            data-selected={petDesktop ? 'true' : undefined}
+            onClick={() => {
+              setDesktopError(null)
+              void props.update?.({ petDesktop: true })
+              // Always POST /spawn: if already in desktop mode after a failed
+              // download, persist is a no-op and the reconcile effect won't fire.
+              void fetch(`${PET_DESKTOP_PREFIX}/spawn`, { method: 'POST', headers: CSRF_HEADERS, body: '{}' })
+            }}
+          >
+            {props.t?.('pet.mode.desktop') ?? '桌面'}
+          </button>
+          <button
+            type="button"
+            className="dsd-pet__callout__item"
+            data-selected={!petDesktop ? 'true' : undefined}
+            onClick={() => {
+              setDesktopError(null)
+              void props.update?.({ petDesktop: false })
+            }}
+          >
+            {props.t?.('pet.mode.browser') ?? '浏览器'}
+          </button>
+        </div>
       </div>
     </div>,
     document.body,

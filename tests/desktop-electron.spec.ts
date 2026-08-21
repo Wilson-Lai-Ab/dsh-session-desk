@@ -51,6 +51,17 @@ describe('ensureElectron', () => {
     expect(extractSpy).toHaveBeenCalled()
   })
 
+  it('streams via download() when fetch is not injected', async () => {
+    const dir = `/tmp/dsh-pet-test-${Date.now()}`
+    const t = { version: ELECTRON_VERSION, cacheDir: dir, downloadUrl: 'https://example.com/e.zip', exePath: `${dir}/electron` } as ReturnType<typeof detectTarget>
+    const download = vi.fn(async (_url: string, dest: string) => { writeFileSync(dest, 'zip') })
+    const extractSpy = vi.fn((zip: string, dest: string) => { writeFileSync(join(dest, 'electron'), 'x') })
+    const result = await ensureElectron(t, { download, extractZip: extractSpy })
+    expect(result).toBe(t.exePath)
+    expect(download).toHaveBeenCalledWith(t.downloadUrl, expect.stringMatching(/\.zip$/))
+    expect(extractSpy).toHaveBeenCalled()
+  })
+
   it('throws when extraction does not produce the executable', async () => {
     const dir = `/tmp/dsh-pet-test-${Date.now()}`
     const t = { version: ELECTRON_VERSION, cacheDir: dir, downloadUrl: 'https://example.com/e.zip', exePath: `${dir}/electron` } as ReturnType<typeof detectTarget>

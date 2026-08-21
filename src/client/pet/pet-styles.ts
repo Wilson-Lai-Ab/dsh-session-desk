@@ -141,6 +141,20 @@ export const cssText = `
 .dsd-pet__callout__item:hover {
   background: rgba(255, 255, 255, 0.14);
 }
+.dsd-pet__callout__modes {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+  pointer-events: auto;
+}
+.dsd-pet__callout__modes .dsd-pet__callout__item {
+  flex: 1 1 0%;
+  text-align: center;
+  padding: 3px 0;
+}
+.dsd-pet__callout__modes .dsd-pet__callout__item[data-selected] {
+  background: rgba(255, 255, 255, 0.22);
+}
 .dsd-pet__callout::after {
   content: "";
   position: absolute;
@@ -188,6 +202,9 @@ export const cssText = `
   white-space: nowrap;
   pointer-events: none;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+.dsd-pet__preparing[data-kind="error"] {
+  background: rgba(185, 28, 28, 0.9);
 }
 .dsd-pet__cards {
   display: flex;
