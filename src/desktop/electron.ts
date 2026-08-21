@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
-import { join, dirname } from 'node:path'
+import { join, dirname, basename } from 'node:path'
 import { homedir } from 'node:os'
 import { spawnSync } from 'node:child_process'
 
@@ -12,6 +12,7 @@ export interface ElectronTarget {
   version: string
   downloadUrl: string
   exePath: string
+  cacheDir: string
 }
 
 function mapTarget(platform: NodeJS.Platform, arch: string): { tag: string; rel: string } {
@@ -31,6 +32,7 @@ export function detectTarget(platform: NodeJS.Platform = process.platform, arch:
     version: ELECTRON_VERSION,
     downloadUrl: `https://github.com/electron/electron/releases/download/v${ELECTRON_VERSION}/electron-v${ELECTRON_VERSION}-${tag}.zip`,
     exePath: join(root, rel),
+    cacheDir: root,
   }
 }
 
@@ -49,12 +51,12 @@ export async function ensureElectron(
   const fetchFn = deps?.fetch ?? globalThis.fetch
   const res = await fetchFn(target.downloadUrl)
   if (!res.ok) throw new Error(`electron download failed: ${res.status}`)
-  const destDir = dirname(target.exePath)
-  mkdirSync(destDir, { recursive: true })
-  const zipPath = `${target.exePath}.zip`
+  const cacheDir = target.cacheDir ?? dirname(target.exePath)
+  mkdirSync(cacheDir, { recursive: true })
+  const zipPath = join(cacheDir, `${basename(target.exePath)}.zip`)
   await writeFile(zipPath, Buffer.from(await res.arrayBuffer()))
   const extract = deps?.extractZip ?? extractZip
-  extract(zipPath, destDir)
+  extract(zipPath, cacheDir)
   if (!existsSync(target.exePath)) throw new Error('electron extract failed: executable not found')
   return target.exePath
 }
