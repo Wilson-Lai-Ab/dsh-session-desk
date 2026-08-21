@@ -6,10 +6,14 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { createTrashStore } from './trash/store.ts'
 import type { SessionsRootSource } from './sessions-root.ts'
+import { foldSnapshotRows, type AnswerSessionRow } from './answer/fold.ts'
 
 export const MUTATION_HEADER = 'x-dsh-session-desk'
 export const API_PREFIX = '/session-desk/api'
 export const PET_ASSET_PREFIX = '/session-desk/assets/pet'
+
+/** Answer-status-card route prefix (a GET sub-route under the API prefix). */
+export const ANSWER_PET_PREFIX = `${API_PREFIX}/answer-pet`
 
 /** Allowed static pet asset extensions → content type. */
 const PET_ASSET_CONTENT_TYPES: Record<string, string> = {
@@ -323,6 +327,11 @@ export function createSessionDeskHandler(opts: SessionDeskHandlerOptions) {
       }
       if (method === 'GET' && path === `${API_PREFIX}/trash`) {
         writeJson(res, 200, { ok: true, data: await opts.store.listTrash() })
+        return
+      }
+      if (method === 'GET' && path === `${ANSWER_PET_PREFIX}/state`) {
+        const rows = listedSessions(opts.sessions) as unknown[]
+        writeJson(res, 200, { ok: true, data: foldSnapshotRows(rows as AnswerSessionRow[]) })
         return
       }
       if (method !== 'POST') {

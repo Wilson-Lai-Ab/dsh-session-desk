@@ -19,8 +19,11 @@ import {
   type PetKind,
 } from './status.ts'
 import { WhaleMark } from './WhaleMark.tsx'
+import { ApPet } from './ApPet.tsx'
+import { AP_THEME_IDS, apPhaseOf } from './ap-themes.ts'
 import { dshpetTheme } from './dshpet-assets.ts'
 import { pickReaction, resolveSprite, selectTheme, type Sprite } from './themes.ts'
+import { answerPetState, type AnswerStatusCard } from '../api.ts'
 
 interface SessionRow {
   id?: string
@@ -393,7 +396,7 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
   }, [])
   const size = clampPetSize(settings.petSize)
   const theme = useMemo(
-    () => selectTheme(settings.petTheme, resolvePetImage(settings.petImage), dshpetTheme),
+    () => selectTheme(settings.petTheme, resolvePetImage(settings.petImage), dshpetTheme, AP_THEME_IDS),
     [settings.petTheme, settings.petImage],
   )
   const petHeight = Math.round(size / theme.aspect)
@@ -428,6 +431,49 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
   const clearReaction = useCallback(() => setReaction(null), [])
   const displaySprite = reaction ?? sprite
   const isReaction = reaction !== null
+
+  // Single-blink on click for answer-pet themes (non-drag): clear after ~340ms.
+  const [apBlink, setApBlink] = useState(false)
+  const apBlinkTimerRef = useRef<number | undefined>(undefined)
+  const triggerApBlink = useCallback((): void => {
+    if (apBlinkTimerRef.current !== undefined) window.clearTimeout(apBlinkTimerRef.current)
+    setApBlink(true)
+    apBlinkTimerRef.current = window.setTimeout(() => {
+      setApBlink(false)
+      apBlinkTimerRef.current = undefined
+    }, 340)
+  }, [])
+  useEffect(() => {
+    if (apBlinkTimerRef.current !== undefined) window.clearTimeout(apBlinkTimerRef.current)
+    setApBlink(false)
+  }, [theme])
+  useEffect(() => {
+    return () => {
+      if (apBlinkTimerRef.current !== undefined) window.clearTimeout(apBlinkTimerRef.current)
+    }
+  }, [])
+  const isAp = displaySprite.type === 'ap'
+  const apThemeId = isAp ? displaySprite.themeId : null
+
+  // Answer-pet status cards (progress + trajectory) polled from the host.
+  const [apCards, setApCards] = useState<readonly AnswerStatusCard[]>([])
+  useEffect(() => {
+    let active = true
+    const poll = async (): Promise<void> => {
+      if (!active) return
+      try {
+        setApCards(await answerPetState())
+      } catch {
+        /* host route absent → keep last */
+      }
+    }
+    void poll()
+    const timer = window.setInterval(() => void poll(), 2000)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+    }
+  }, [])
 
   const viewport = (): { w: number; h: number } => ({
     w: typeof window === 'undefined' ? 1280 : window.innerWidth,
@@ -494,6 +540,7 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
     const next = livePos.current
     if (moved.current) persistPosition(next.x, next.y)
     else {
+      if (displaySprite.type === 'ap') triggerApBlink()
       const picked = pickReaction(theme)
       if (picked !== null && picked.type === 'video') setReaction(picked)
     }
@@ -518,6 +565,9 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
         type="button"
         className="dsd-pet"
         data-kind={kind}
+        data-ap-theme={apThemeId ?? undefined}
+        data-ap-phase={apThemeId !== null ? apPhaseOf(kind) : undefined}
+        data-ap-click-blink={isAp && apBlink ? 'true' : undefined}
         aria-label={`${props.t?.('pet.title') ?? 'pet'} · ${kindLabel(kind, props.t)}`}
         style={{ left: pos.x, top: pos.y, width: size, height: petHeight }}
         onPointerDown={onPointerDown as never}
@@ -536,7 +586,9 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
                   loop={!isReaction}
                   onEnded={isReaction ? clearReaction : undefined}
                 />
-              : <WhaleMark variant={displaySprite.variant} />}
+              : displaySprite.type === 'ap'
+                ? <ApPet themeId={displaySprite.themeId} />
+                : <WhaleMark variant={displaySprite.variant} />}
         </span>
       </button>
       <div
@@ -630,6 +682,41 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
                   </button>
                 ))}
               </>
+            )}
+            {apCards.length > 0 && (
+              <div className="dsd-pet__cards">
+                {apCards.map(card => (
+                  <div key={card.id} className="dsd-pet__card" data-phase={card.view.phase}>
+                    <div className="dsd-pet__card__head">
+                      <span className="dsd-pet__card__title">{card.title}</span>
+                      <span className="dsd-pet__card__label">{card.view.label}</span>
+                      <span className="dsd-pet__card__pct">{Math.round(card.view.progress)}%</span>
+                    </div>
+                    <div className="dsd-pet__card__bar">
+                      <span style={{ width: `${Math.min(100, Math.max(0, card.view.progress))}%` }} />
+                    </div>
+                    <div className="dsd-pet__card__stats">
+                      <span>{card.view.outputTokens} tok</span>
+                      {card.view.rateTokS > 0 && <span>{card.view.rateTokS} tok/s</span>}
+                      <span>{(card.view.elapsedMs / 1000).toFixed(1)}s</span>
+                    </div>
+                    {card.trace.length > 0 && (
+                      <ol className="dsd-pet__card__trace">
+                        {card.trace.slice(-4).map(item => (
+                          <li key={item.id} data-status={item.status}>
+                            <span className="dsd-pet__card__dot" />
+                            <span className="dsd-pet__card__trace-label">{item.label}</span>
+                            {item.detail !== null && item.detail !== undefined && (
+                              <span className="dsd-pet__card__trace-detail">{item.detail}</span>
+                            )}
+                            <span className="dsd-pet__card__trace-time">{(item.durationMs / 1000).toFixed(1)}s</span>
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                  </div>
+                ))}
+              </div>
             )}
           </>
         )}

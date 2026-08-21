@@ -1,6 +1,7 @@
 /**
  * Pet overlay stylesheet: injected once (single client bundle, no CSS artifact).
  */
+import { apThemesCss } from './ap-themes.ts'
 
 export const STYLE_ID = 'dsh-session-desk-pet-style'
 
@@ -185,6 +186,126 @@ export const cssText = `
 .dsd-pet__callout[data-below][data-kind="error"]::after { border-bottom-color: #b91c1c; }
 .dsd-pet__callout[data-below][data-kind="running"]::after { border-bottom-color: #1e3a8a; }
 .dsd-pet__callout[data-below][data-kind="subagent"]::after { border-bottom-color: #1e3a8a; }
+.dsd-pet__cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.18);
+  padding-top: 6px;
+  white-space: normal;
+  max-height: min(340px, 40vh);
+  overflow-y: auto;
+}
+.dsd-pet__card {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+}
+.dsd-pet__card__head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-weight: 600;
+}
+.dsd-pet__card__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dsd-pet__card__label {
+  font-weight: 500;
+  opacity: 0.9;
+  white-space: nowrap;
+}
+.dsd-pet__card__pct {
+  font-weight: 700;
+  white-space: nowrap;
+}
+.dsd-pet__card__bar {
+  position: relative;
+  height: 5px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.28);
+}
+.dsd-pet__card__bar > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #3b82f6, #22d3ee);
+  transition: width 0.5s ease;
+}
+.dsd-pet__card[data-phase="error"] .dsd-pet__card__bar > span { background: linear-gradient(90deg, #ef4444, #f97316); }
+.dsd-pet__card[data-phase="tool"] .dsd-pet__card__bar > span { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+.dsd-pet__card__stats {
+  display: flex;
+  gap: 8px;
+  font-size: 10px;
+  font-weight: 500;
+  opacity: 0.85;
+  white-space: nowrap;
+}
+.dsd-pet__card__trace {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 10px;
+}
+.dsd-pet__card__trace li {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.dsd-pet__card__dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #60a5fa;
+  animation: dsd-pet-card-pulse 1.4s ease-in-out infinite;
+}
+.dsd-pet__card__trace li[data-status="done"] .dsd-pet__card__dot {
+  background: #34d399;
+  animation: none;
+}
+.dsd-pet__card__trace li[data-status="error"] .dsd-pet__card__dot {
+  background: #f87171;
+  animation: none;
+}
+.dsd-pet__card__trace-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dsd-pet__card__trace-detail {
+  flex: 0 0 auto;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.78;
+}
+.dsd-pet__card__trace-time {
+  flex: 0 0 auto;
+  opacity: 0.7;
+  white-space: nowrap;
+}
+@keyframes dsd-pet-card-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(96, 165, 250, 0.55); }
+  50% { box-shadow: 0 0 0 4px rgba(96, 165, 250, 0); }
+}
 @keyframes dsd-pet-bob {
   0%, 100% { translate: 0 0; }
   50% { translate: 0 -4px; }
@@ -263,6 +384,6 @@ export function adoptPetStyles(): void {
   style.id = STYLE_ID
   style.dataset.plugin = 'dsh-session-desk'
   style.dataset.pluginCss = STYLE_ID
-  style.textContent = cssText
+  style.textContent = `${cssText}\n${apThemesCss()}`
   document.head.appendChild(style)
 }

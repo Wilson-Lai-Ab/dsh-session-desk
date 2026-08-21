@@ -64,12 +64,14 @@ function fallbackT(key: SessionDeskKey, vars?: Record<string, string | number>):
     'board.enabled': '在对话页显示看板 Tab',
     'pet.enabled': '显示小宠物',
     'pet.theme': '宠物主题',
-    'pet.theme.whale': '鲸鱼',
+    'pet.theme.blue-whale': '蓝鲸',
+    'pet.theme.orange-cat': '橘猫',
+    'pet.theme.silver-shaded-cat': '银渐层猫',
     'pet.theme.dshpet': '大肥鱼',
     'pet.theme.custom': '自定义图片',
     'pet.size': '宠物宽度（px）',
     'pet.image': '形象 URL',
-    'pet.imageHint': '留空使用内置鲸鱼。仅允许 http(s)、data:image 或同源路径。',
+    'pet.imageHint': '留空使用内置蓝鲸。仅允许 http(s)、data:image 或同源路径。',
     'pet.reset': '重置位置',
   }
   let text = table[key] ?? key
@@ -289,9 +291,9 @@ export function SettingsSection(props: SessionDeskSectionProps): ReactNode {
                 if ((PET_THEME_IDS as readonly string[]).includes(next)) void persist({ petTheme: next })
               }}
             >
-              <option value="whale">{t('pet.theme.whale')}</option>
-              <option value="dshpet">{t('pet.theme.dshpet')}</option>
-              <option value="custom">{t('pet.theme.custom')}</option>
+              {PET_THEME_IDS.map(id => (
+                <option key={id} value={id}>{t(`pet.theme.${id}`)}</option>
+              ))}
             </select>
           </label>
           <label className="dsd-setting">

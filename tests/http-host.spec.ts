@@ -31,7 +31,7 @@ vi.mock('@deepseek-ai/schemastery', () => {
 
 import { apply } from '../src/index.ts'
 import { liveSessionDir } from '../src/session-path.ts'
-import { probeSessionForget, probeSessionReload, validateLoopbackHost } from '../src/http.ts'
+import { probeSessionForget, probeSessionReload, validateLoopbackHost, ANSWER_PET_PREFIX } from '../src/http.ts'
 
 interface FakeRes {
   status: number
@@ -280,6 +280,29 @@ describe('session-desk host HTTP', () => {
       expect(body.data).toHaveLength(1)
       expect(body.data[0]!.sessionId).toBe(parentId)
       expect(body.data[0]!.memberCount).toBe(1)
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('GET answer-pet/state folds the sessions snapshot into status cards', async () => {
+    const sessions = {
+      list: () => [
+        { id: 'main', title: '会话管理插件', openState: 'streaming', running: true },
+        { id: 'child', parentId: 'main', openState: 'running', running: true, origin: 'subagent' },
+        { id: 'idle-one', title: '待机会话', running: false },
+      ],
+    }
+    const { api, cleanup } = mount({ sessions })
+    try {
+      const res = fakeRes()
+      await api(req('GET', `${ANSWER_PET_PREFIX}/state`, { host: '127.0.0.1' }), res)
+      expect(res.status).toBe(200)
+      const body = JSON.parse(res.body) as { ok: true; data: Array<{ id: string; view: { phase: string } }> }
+      expect(body.ok).toBe(true)
+      // subagent child is folded away; only top-level sessions get cards
+      expect(body.data.map(card => card.id).sort()).toEqual(['idle-one', 'main'])
+      expect(body.data.find(card => card.id === 'main')?.view.phase).toBe('stream')
     } finally {
       cleanup()
     }

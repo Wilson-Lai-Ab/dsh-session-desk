@@ -1,14 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildAnswerTheme,
   buildCustomTheme,
   pickReaction,
   resolveSprite,
   selectTheme,
-  whaleTheme,
   type PetTheme,
   type Sprite,
 } from '../src/client/pet/themes.ts'
 import { dshpetTheme } from '../src/client/pet/dshpet-assets.ts'
+import { AP_THEME_IDS, apPhaseOf, apThemesCss, resolveApTheme } from '../src/client/pet/ap-themes.ts'
 
 function sprite(type: Sprite['type'], v: string): Sprite {
   if (type === 'image' || type === 'video') return { type, src: v }
@@ -65,27 +66,68 @@ describe('resolveSprite', () => {
   })
 })
 
-describe('whaleTheme', () => {
-  it('uses a single pixel-whale image sprite', () => {
-    expect(whaleTheme.idlePool).toEqual([{ type: 'image', src: '/session-desk/assets/pet/whale.png' }])
+describe('answer-pet themes', () => {
+  it('exposes the three built-in theme ids', () => {
+    expect(AP_THEME_IDS).toEqual(['blue-whale', 'orange-cat', 'silver-shaded-cat'])
   })
 
-  it('defines all four busy kinds with the same whale image', () => {
-    for (const kind of ['running', 'error', 'awaiting', 'subagent'] as const) {
-      const s = whaleTheme.busy[kind]
-      expect(s).toEqual({ type: 'image', src: '/session-desk/assets/pet/whale.png' })
+  it('each theme has svg markup, scoped css, and all seven phase metas', () => {
+    for (const id of AP_THEME_IDS) {
+      const theme = resolveApTheme(id)
+      expect(theme.markup).toContain('<svg')
+      expect(theme.markup).toContain('ap-pet-svg')
+      expect(theme.css).toContain(`data-ap-theme="${id}"`)
+      for (const phase of ['idle', 'turn', 'think', 'stream', 'tool', 'done', 'error'] as const) {
+        expect(typeof theme.phases[phase].animation).toBe('string')
+      }
     }
   })
 
-  it('has no click reactions', () => {
-    expect(whaleTheme.reactions).toBeUndefined()
+  it('silver-shaded-cat renders through a served png (not inline base64)', () => {
+    const theme = resolveApTheme('silver-shaded-cat')
+    expect(theme.markup).toContain('silver-cat-cropped.png')
+    expect(theme.markup).not.toContain('data:image/png;base64')
+  })
+
+  it('mapped species have sensible aspect ratios', () => {
+    expect(resolveApTheme('blue-whale').aspect).toBe(200 / 120)
+    expect(resolveApTheme('orange-cat').aspect).toBe(150 / 120)
+    expect(resolveApTheme('silver-shaded-cat').aspect).toBe(1201 / 1229)
+  })
+
+  it('apThemesCss concatenates every theme scoped to the pet host', () => {
+    const css = apThemesCss()
+    for (const id of AP_THEME_IDS) {
+      expect(css).toContain(`.dsd-pet[data-ap-theme="${id}"]`)
+    }
+  })
+})
+
+describe('apPhaseOf', () => {
+  it('maps pet kinds to the driving answer-pet phase', () => {
+    expect(apPhaseOf('idle')).toBe('idle')
+    expect(apPhaseOf('running')).toBe('stream')
+    expect(apPhaseOf('subagent')).toBe('stream')
+    expect(apPhaseOf('error')).toBe('error')
+    expect(apPhaseOf('awaiting')).toBe('tool')
+  })
+})
+
+describe('buildAnswerTheme', () => {
+  it('uses an ap sprite for every status and the theme aspect', () => {
+    const th = buildAnswerTheme('blue-whale')
+    expect(th.idlePool).toEqual([{ type: 'ap', themeId: 'blue-whale' }])
+    for (const kind of ['running', 'error', 'awaiting', 'subagent'] as const) {
+      expect(th.busy[kind]).toEqual({ type: 'ap', themeId: 'blue-whale' })
+    }
+    expect(th.aspect).toBe(200 / 120)
   })
 })
 
 describe('pickReaction', () => {
   it('returns null when the theme has no reactions', () => {
     expect(pickReaction(theme(), zero)).toBeNull()
-    expect(pickReaction(whaleTheme, zero)).toBeNull()
+    expect(pickReaction(buildAnswerTheme('blue-whale'), zero)).toBeNull()
   })
 
   it('picks a reaction from the pool', () => {
@@ -112,25 +154,27 @@ describe('buildCustomTheme', () => {
 
 describe('selectTheme', () => {
   const dshpet: PetTheme = theme()
+  const apIds = AP_THEME_IDS
 
-  it('returns the whale theme by default and for whale id', () => {
-    expect(selectTheme('whale', null, dshpet)).toBe(whaleTheme)
-    expect(selectTheme('whale', 'https://x/y.gif', dshpet)).toBe(whaleTheme)
+  it('returns the answer-pet theme for each ap id', () => {
+    for (const id of apIds) {
+      expect(selectTheme(id as 'blue-whale', null, dshpet, apIds).busy.running).toEqual({ type: 'ap', themeId: id })
+    }
   })
 
   it('returns the dshpet theme for dshpet id', () => {
-    expect(selectTheme('dshpet', null, dshpet)).toBe(dshpet)
+    expect(selectTheme('dshpet', null, dshpet, apIds)).toBe(dshpet)
   })
 
-  it('returns the custom theme when an image is set, whale otherwise', () => {
-    expect(selectTheme('custom', 'https://x/y.gif', dshpet).id).toBe('custom')
-    expect(selectTheme('custom', null, dshpet)).toBe(whaleTheme)
+  it('returns the custom theme when an image is set, blue-whale otherwise', () => {
+    expect(selectTheme('custom', 'https://x/y.gif', dshpet, apIds).id).toBe('custom')
+    expect(selectTheme('custom', null, dshpet, apIds).id).toBe('blue-whale')
   })
 })
 
 describe('theme aspect ratio', () => {
-  it('whale theme matches the pixel whale image (698x514), custom is square', () => {
-    expect(whaleTheme.aspect).toBe(698 / 514)
+  it('ap themes keep their real SVG aspect, custom is square', () => {
+    expect(selectTheme('blue-whale', null, theme(), AP_THEME_IDS).aspect).toBe(200 / 120)
     expect(buildCustomTheme('https://x/y.gif').aspect).toBe(1)
   })
 

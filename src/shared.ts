@@ -12,8 +12,8 @@ export const HISTORY_POSITIONS = ['off', 'left', 'right'] as const
 /** One selectable history-strip side (`off` hides the strip). */
 export type HistoryPosition = (typeof HISTORY_POSITIONS)[number]
 
-/** Selectable pet theme: `whale` = animated SVG, `dshpet` = bundled dsh-pet GIFs, `custom` = petImage. */
-export const PET_THEME_IDS = ['whale', 'dshpet', 'custom'] as const
+/** Selectable pet theme: answer-pet themes (SVG/动画) or `dshpet` (bundled dsh-pet webm) or `custom` (petImage). */
+export const PET_THEME_IDS = ['blue-whale', 'orange-cat', 'silver-shaded-cat', 'dshpet', 'custom'] as const
 export type PetThemeId = (typeof PET_THEME_IDS)[number]
 
 /** Allowed pet size range (CSS px). `petSize` is the pet WIDTH; height follows the theme aspect ratio. */
@@ -112,7 +112,7 @@ export const DEFAULT_SETTINGS: SessionDeskSettings = {
   petEnabled: true,
   petDesktop: false,
   petImage: '',
-  petTheme: 'whale',
+  petTheme: 'blue-whale',
   petSize: PET_SIZE_DEFAULT,
   petX: -1,
   petY: -1,

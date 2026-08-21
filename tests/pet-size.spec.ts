@@ -38,7 +38,9 @@ describe('clampPetSize', () => {
 
 describe('cachedThemeOrNull', () => {
   it('returns a valid theme id', () => {
-    expect(cachedThemeOrNull('whale')).toBe('whale')
+    expect(cachedThemeOrNull('blue-whale')).toBe('blue-whale')
+    expect(cachedThemeOrNull('orange-cat')).toBe('orange-cat')
+    expect(cachedThemeOrNull('silver-shaded-cat')).toBe('silver-shaded-cat')
     expect(cachedThemeOrNull('dshpet')).toBe('dshpet')
     expect(cachedThemeOrNull('custom')).toBe('custom')
   })
