@@ -1,4 +1,4 @@
-# dsh-session-desk 桌面宠物 设计（Electron 透明置顶窗 + 全局/关闭模式）
+# dsh-session-desk 桌面宠物 设计（Electron 透明置顶窗 + 桌面/浏览器模式）
 
 **日期**：2026-08-21
 **状态**：待审阅
@@ -13,8 +13,8 @@
 | 桌面窗口技术 | Electron（无边框 + 透明 + always-on-top + 透明区鼠标穿透），复用现有 webm 动画与 React 组件 |
 | Electron 分发 | **按需下载**：首次启用时按平台下载官方 Electron（约 150MB）缓存到用户目录，之后离线复用，版本锁定 |
 | 平台范围 | 三平台一起设计（Windows / macOS / Linux），实现按平台验证 |
-| 模式切换 | 宠物上两级「选择」：**「全局」**= 桌面展示（浏览器隐藏）；**「关闭」**= 回到浏览器（桌面窗关闭）。两侧宠物都能切 |
-| 模式持久化 | 新增 `petDesktop`（布尔，默认 `false` 向后兼容）。`true`=全局（桌面为主场），`false`=关闭（浏览器为主场） |
+| 模式切换 | 宠物上两级「选择」：**「桌面」**= 常驻桌面最上层、不被遮挡（浏览器隐藏）；**「浏览器」**= 只在浏览器显示（桌面窗关闭）。两侧宠物都能切 |
+| 模式持久化 | 新增 `petDesktop`（布尔，默认 `false`）。`true`=桌面为主场，`false`=浏览器为主场；持久化，记住上次选择，启动时按值自动拉起/收起桌面窗 |
 | 状态同步 | 桌面壳与浏览器都**轮询 host 本地 HTTP**（1s 起步），不引入 WebSocket |
 | 会话数据源 | host 复用 `webHost.sessions.list()`（`listedSessions` 同源），桌面宠物拿到与浏览器完全相同的会话状态 |
 
@@ -123,9 +123,9 @@ flowchart LR
 
 ### 5.2 模式选择 UI（`PetOverlay` 增一个小选择器）
 
-- 气泡内加两级「选择」：**「全局」** / **「关闭」**，label 走 locale。
-- 「全局」→ `settings.update({ petDesktop: true })` + `POST /spawn`。
-- 「关闭」→ `settings.update({ petDesktop: false })` + `POST /close`。
+- 气泡内加两级「选择」：**「桌面」** / **「浏览器」**，label 走 locale。
+- 「桌面」→ `settings.update({ petDesktop: true })` + `POST /spawn`。
+- 「浏览器」→ `settings.update({ petDesktop: false })` + `POST /close`。
 - 两侧宠物（浏览器 / 桌面）都渲染该选择器，保证能从任一状态切回。
 
 ### 5.3 浏览器宠物显隐
@@ -137,9 +137,10 @@ flowchart LR
 
 ## 6. 数据流
 
-1. 用户点「全局」→ 浏览器 `POST /spawn` + 写 `petDesktop=true` → host 下载/复用 Electron 并 spawn → `active=true` → 浏览器宠物隐藏。
+0. 启动：若 `petDesktop=true` 已持久化，浏览器初始化后自动 `POST /spawn`，桌面宠物直接接管（浏览器隐藏）；否则浏览器宠物照常显示。
+1. 用户点「桌面」→ 浏览器 `POST /spawn` + 写 `petDesktop=true` → host 下载/复用 Electron 并 spawn → `active=true` → 浏览器宠物隐藏。
 2. 桌面壳轮询 `/snapshot` 渲染会话状态（与浏览器同源）。
-3. 用户点「关闭」（任一宠物）→ `POST /close` + 写 `petDesktop=false` → host 杀进程 → `active=false` → 浏览器宠物恢复。
+3. 用户点「浏览器」（任一宠物）→ `POST /close` + 写 `petDesktop=false` → host 杀进程 → `active=false` → 浏览器宠物恢复。
 4. 桌面点会话 → `POST /open` → 浏览器消费 `pendingOpen` → `sessions.open(id)`。
 
 ---
@@ -147,7 +148,7 @@ flowchart LR
 ## 7. 文件清单
 
 - 新：`src/desktop/electron.ts`（下载）、`src/desktop/lifecycle.ts`（spawn/kill）、`src/desktop/http.ts`（端点）、`desktop-shell/main.mjs`、`desktop-shell/renderer.tsx`
-- 改：`src/index.ts`（注册端点 + 注入 desktop handler）、`src/shared.ts` / `src/index.ts`（`petDesktop` 设置）、`src/client/pet/PetOverlay.tsx`（模式选择 + 显隐轮询）、`src/client/locales.ts`（`pet.mode.global` / `pet.mode.close` 等文案）、`build.mjs`（desktop-renderer 打包）
+- 改：`src/index.ts`（注册端点 + 注入 desktop handler）、`src/shared.ts` / `src/index.ts`（`petDesktop` 设置）、`src/client/pet/PetOverlay.tsx`（模式选择 + 显隐轮询）、`src/client/locales.ts`（`pet.mode.desktop` / `pet.mode.browser` 等文案）、`build.mjs`（desktop-renderer 打包）
 - 测试：`tests/desktop-electron.spec.ts`（目标映射 / 版本锁定）、`tests/desktop-lifecycle.spec.ts`（spawn/close 状态机，可 mock 子进程）、`tests/desktop-http.spec.ts`（端点契约）
 
 ---
