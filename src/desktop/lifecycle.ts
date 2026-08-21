@@ -25,14 +25,18 @@ export function createDesktopPetController(deps?: Deps): DesktopPetController {
     async spawn(baseUrl: string, token: string): Promise<void> {
       const exe = await getExecutable()
       const mainJs = fileURLToPath(new URL('./desktop/main.mjs', import.meta.url))
-      child = spawnFn(exe, [mainJs, `--base=${baseUrl}`, `--token=${token}`], { stdio: 'ignore' })
+      const spawned = spawnFn(exe, [mainJs, `--base=${baseUrl}`, `--token=${token}`], { stdio: 'ignore' })
+      child = spawned
       active = true
-      child.on('exit', () => {
+      spawned.on('exit', () => {
+        // Ignore a stale exit from an older child: close() may have raced a newer
+        // spawn, and a late exit from the old child must not null the new one.
+        if (child !== spawned) return
         active = false
         child = null
         for (const cb of exitCbs) cb()
       })
-      child.unref?.()
+      spawned.unref?.()
     },
     close(): void {
       if (child !== null) child.kill()

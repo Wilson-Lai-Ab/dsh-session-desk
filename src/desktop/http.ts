@@ -9,6 +9,7 @@ export interface DesktopPetHandlerOptions {
   sessions: object
   controller: DesktopPetController
   getPetSettings: () => Partial<SessionDeskSettings>
+  updatePetSetting: (patch: Partial<SessionDeskSettings>) => Promise<void>
   token: string
   state: { pendingOpen: { id: string; at: number } | null }
   shellAssets?: { rendererHtml: string; rendererJs: string }
@@ -48,13 +49,22 @@ export function createDesktopPetHandler(opts: DesktopPetHandlerOptions) {
     const body = asRecord(await readJsonBody(req))
 
     if (path === `${PET_DESKTOP_PREFIX}/spawn`) {
-      const host = header(req, 'host') ?? '127.0.0.1:3080'
-      await opts.controller.spawn(`http://${host}`, opts.token)
-      writeJson(res, 200, { ok: true, active: true })
+      try {
+        const host = header(req, 'host') ?? '127.0.0.1:3080'
+        await opts.controller.spawn(`http://${host}`, opts.token)
+        writeJson(res, 200, { ok: true, active: true })
+      } catch (error) {
+        // Spec §8: a failed spawn is a surfaced `{error}` contract, not a throw.
+        const message = error instanceof Error && error.message ? error.message : 'spawn failed'
+        writeJson(res, 500, { ok: false, error: message })
+      }
       return
     }
     if (path === `${PET_DESKTOP_PREFIX}/close`) {
       opts.controller.close()
+      // Persist browser mode when the desktop pet is being closed by the 浏览器
+      // selector button (Fix 2): the browser pet's own update is a no-op here.
+      if (body.petDesktop === false) await opts.updatePetSetting({ petDesktop: false })
       writeJson(res, 200, { ok: true, active: false })
       return
     }

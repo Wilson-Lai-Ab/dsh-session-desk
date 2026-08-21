@@ -87,6 +87,7 @@ export const SessionDeskSettingsSchema: Schema<SessionDeskSettings> = z.object({
 
 interface SettingsScope {
   get?: () => Partial<SessionDeskSettings>
+  update?: (patch: Partial<SessionDeskSettings>) => unknown
 }
 
 interface SettingsRegistrar {
@@ -129,6 +130,9 @@ export function apply(ctx: unknown, config?: { sessionsRoot?: string }): void {
     ...DEFAULT_SETTINGS,
     sessionsRoot: config?.sessionsRoot ?? DEFAULT_SETTINGS.sessionsRoot,
   })
+  // Persist mutations from the desktop-pet HTTP handlers (e.g. /close persisting
+  // browser mode). Falls back to a no-op when settings registration is absent.
+  let updatePetSetting: (patch: Partial<SessionDeskSettings>) => Promise<void> = () => Promise.resolve()
 
   settingsHost.inject(['settings'], (scope) => {
     const registered = scope.settings.register(settingsNamespace(SESSION_DESK_NS), SessionDeskSettingsSchema, {
@@ -141,6 +145,10 @@ export function apply(ctx: unknown, config?: { sessionsRoot?: string }): void {
     if (registered !== undefined && typeof registered.get === 'function') {
       const get = registered.get
       readSettings = () => ({ ...DEFAULT_SETTINGS, ...get() })
+    }
+    if (registered !== undefined && typeof registered.update === 'function') {
+      const update = registered.update
+      updatePetSetting = async (patch: Partial<SessionDeskSettings>) => { void update(patch) }
     }
   })
 
@@ -191,6 +199,7 @@ export function apply(ctx: unknown, config?: { sessionsRoot?: string }): void {
             petY: s.petY,
           }
         },
+        updatePetSetting,
         token: petToken,
         state: petState,
         shellAssets: {

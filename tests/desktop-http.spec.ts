@@ -1,4 +1,4 @@
-import { describe, expect, it, afterAll, beforeAll } from 'vitest'
+import { describe, expect, it, vi, afterAll, beforeAll } from 'vitest'
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -12,15 +12,17 @@ function handlerWith(overrides = {}) {
     spawn: async () => { controller.active = true },
     isActive: () => Boolean(controller.active),
   }
+  const updatePetSetting = vi.fn(async () => {})
   const handler = createDesktopPetHandler({
     sessions: {},
     controller,
     getPetSettings: () => ({ petImage: 'x.png' }),
+    updatePetSetting,
     token: 'tok',
     state,
     ...overrides,
   } as never)
-  return { handler, state, controller }
+  return { handler, state, controller, updatePetSetting }
 }
 
 function call(handler: (req: never, res: never) => Promise<void>, method: string, path: string, body?: unknown, headers: Record<string, string> = {}) {
@@ -65,6 +67,9 @@ function statusOf(handler: (req: never, res: never) => Promise<void>, method: st
   }
   return handler(req as never, res as never).then(() => res.status)
 }
+
+/** Headers that pass the mutation gate (x-dsh-session-desk: 1 + JSON content-type). */
+const mutationHeaders = { 'x-dsh-session-desk': '1', 'content-type': 'application/json' }
 
 describe('desktop-pet endpoints', () => {
   it('GET /status returns active', async () => {
@@ -138,6 +143,54 @@ describe('desktop-pet endpoints', () => {
     // A GET-only static route; a POST falls through to the mutation gate, which
     // rejects the missing mutation header with 403 before reaching it.
     expect(await statusOf(handler, 'POST', `${PET_DESKTOP_PREFIX}/renderer.js`)).toBe(403)
+  })
+
+  it('/spawn returns active on success', async () => {
+    const { handler } = handlerWith()
+    const r = await call(handler, 'POST', `${PET_DESKTOP_PREFIX}/spawn`, {}, mutationHeaders)
+    expect(r.status).toBe(200)
+    expect(r.body).toEqual({ ok: true, active: true })
+  })
+
+  it('/spawn returns 500 {error} when spawning throws and does not rethrow', async () => {
+    const { handler, controller } = handlerWith()
+    controller.spawn = async () => { throw new Error('boom') }
+    const r = await call(handler, 'POST', `${PET_DESKTOP_PREFIX}/spawn`, {}, mutationHeaders)
+    expect(r.status).toBe(500)
+    expect(r.body.ok).toBe(false)
+    expect(r.body.error).toBe('boom')
+  })
+
+  it('/spawn returns 500 with a default error message on a non-Error throw', async () => {
+    const { handler, controller } = handlerWith()
+    controller.spawn = async () => { throw 'not-an-error' }
+    const r = await call(handler, 'POST', `${PET_DESKTOP_PREFIX}/spawn`, {}, mutationHeaders)
+    expect(r.status).toBe(500)
+    expect(r.body.ok).toBe(false)
+    expect(r.body.error).toBe('spawn failed')
+  })
+
+  it('/close without petDesktop:false does not persist the mode', async () => {
+    const { handler, updatePetSetting } = handlerWith()
+    const r = await call(handler, 'POST', `${PET_DESKTOP_PREFIX}/close`, {}, mutationHeaders)
+    expect(r.status).toBe(200)
+    expect(r.body).toEqual({ ok: true, active: false })
+    expect(updatePetSetting).not.toHaveBeenCalled()
+  })
+
+  it('/close with petDesktop:false persists browser mode via updatePetSetting', async () => {
+    const { handler, updatePetSetting } = handlerWith()
+    const r = await call(handler, 'POST', `${PET_DESKTOP_PREFIX}/close`, { petDesktop: false }, mutationHeaders)
+    expect(r.status).toBe(200)
+    expect(r.body).toEqual({ ok: true, active: false })
+    expect(updatePetSetting).toHaveBeenCalledWith({ petDesktop: false })
+  })
+
+  it('/close with petDesktop:true does not persist the mode', async () => {
+    const { handler, updatePetSetting } = handlerWith()
+    const r = await call(handler, 'POST', `${PET_DESKTOP_PREFIX}/close`, { petDesktop: true }, mutationHeaders)
+    expect(r.status).toBe(200)
+    expect(updatePetSetting).not.toHaveBeenCalled()
   })
 })
 

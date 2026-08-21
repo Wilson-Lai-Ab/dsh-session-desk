@@ -284,6 +284,23 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
     }
   }, [petDesktop, props.sessions])
 
+  // Re-arm the desktop pet on load if petDesktop was persisted (spec §6 step 0).
+  // Runs exactly once on mount: a GUI restart that persisted petDesktop=true
+  // should bring the desktop shell back up without the user re-clicking 桌面.
+  useEffect(() => {
+    if (!petDesktop) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch(`${PET_DESKTOP_PREFIX}/spawn`, { method: 'POST', headers: CSRF_HEADERS, body: '{}' })
+        if (!res.ok && !cancelled) void props.update?.({ petDesktop: false })
+      } catch {
+        if (!cancelled) void props.update?.({ petDesktop: false })
+      }
+    })()
+    return () => { cancelled = true }
+  }, []) // mount only
+
   useEffect(() => {
     if (props.useSessions) return
     try {
@@ -632,7 +649,9 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
             className="dsd-pet__callout__item"
             onClick={() => {
               void props.update?.({ petDesktop: false })
-              void fetch(`${PET_DESKTOP_PREFIX}/close`, { method: 'POST', headers: CSRF_HEADERS, body: '{}' })
+              // Body carries petDesktop:false so the desktop pet's /close persists
+              // browser mode on the host (the browser pet's own update is a no-op there).
+              void fetch(`${PET_DESKTOP_PREFIX}/close`, { method: 'POST', headers: CSRF_HEADERS, body: JSON.stringify({ petDesktop: false }) })
             }}
           >
             {props.t?.('pet.mode.browser') ?? '浏览器'}
