@@ -35,7 +35,7 @@ export function createDesktopPetHandler(opts: DesktopPetHandlerOptions) {
     }
 
     if (method === 'GET' && path === `${PET_DESKTOP_PREFIX}/status`) {
-      writeJson(res, 200, { ok: true, active: opts.controller.isActive(), pendingOpen: opts.state.pendingOpen })
+      writeJson(res, 200, { ok: true, active: opts.controller.isActive(), pendingOpen: opts.state.pendingOpen, download: opts.controller.downloadState() })
       return
     }
     if (method === 'GET' && path === `${PET_DESKTOP_PREFIX}/snapshot`) {
@@ -49,15 +49,12 @@ export function createDesktopPetHandler(opts: DesktopPetHandlerOptions) {
     const body = asRecord(await readJsonBody(req))
 
     if (path === `${PET_DESKTOP_PREFIX}/spawn`) {
-      try {
-        const host = header(req, 'host') ?? '127.0.0.1:3080'
-        await opts.controller.spawn(`http://${host}`, opts.token)
-        writeJson(res, 200, { ok: true, active: true })
-      } catch (error) {
-        // Spec §8: a failed spawn is a surfaced `{error}` contract, not a throw.
-        const message = error instanceof Error && error.message ? error.message : 'spawn failed'
-        writeJson(res, 500, { ok: false, error: message })
-      }
+      const host = header(req, 'host') ?? '127.0.0.1:3080'
+      // Non-blocking: kick off the Electron download + shell launch in the
+      // background and return 202 Accepted. Download progress and the final
+      // ready/failed state are exposed via GET /status (downloadState).
+      void opts.controller.spawn(`http://${host}`, opts.token)
+      writeJson(res, 202, { ok: true, active: false, downloading: true })
       return
     }
     if (path === `${PET_DESKTOP_PREFIX}/close`) {

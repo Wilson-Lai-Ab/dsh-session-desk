@@ -145,29 +145,30 @@ describe('desktop-pet endpoints', () => {
     expect(await statusOf(handler, 'POST', `${PET_DESKTOP_PREFIX}/renderer.js`)).toBe(403)
   })
 
-  it('/spawn returns active on success', async () => {
+  it('/spawn returns 202 Accepted without waiting for the download', async () => {
+    const { handler, controller } = handlerWith()
+    let resolved = false
+    controller.spawn = async () => { await new Promise<void>(r => setTimeout(r, 60)); resolved = true }
+    const t0 = Date.now()
+    const r = await call(handler, 'POST', `${PET_DESKTOP_PREFIX}/spawn`, {}, mutationHeaders)
+    expect(r.status).toBe(202)
+    expect(r.body).toEqual({ ok: true, active: false, downloading: true })
+    expect(resolved).toBe(false) // did not await download completion
+    expect(Date.now() - t0).toBeLessThan(60)
+  })
+
+  it('/spawn 404 returns non-2xx so the client can revert', async () => {
     const { handler } = handlerWith()
-    const r = await call(handler, 'POST', `${PET_DESKTOP_PREFIX}/spawn`, {}, mutationHeaders)
+    const r = await call(handler, 'POST', `${PET_DESKTOP_PREFIX}/spawn-nope`, {}, mutationHeaders)
+    expect(r.status).toBe(404)
+  })
+
+  it('/status publishes download progress', async () => {
+    const { handler, controller } = handlerWith()
+    ;(controller as { downloadState?: () => unknown }).downloadState = () => ({ stage: 'downloading', pct: null })
+    const r = await call(handler, 'GET', `${PET_DESKTOP_PREFIX}/status`)
     expect(r.status).toBe(200)
-    expect(r.body).toEqual({ ok: true, active: true })
-  })
-
-  it('/spawn returns 500 {error} when spawning throws and does not rethrow', async () => {
-    const { handler, controller } = handlerWith()
-    controller.spawn = async () => { throw new Error('boom') }
-    const r = await call(handler, 'POST', `${PET_DESKTOP_PREFIX}/spawn`, {}, mutationHeaders)
-    expect(r.status).toBe(500)
-    expect(r.body.ok).toBe(false)
-    expect(r.body.error).toBe('boom')
-  })
-
-  it('/spawn returns 500 with a default error message on a non-Error throw', async () => {
-    const { handler, controller } = handlerWith()
-    controller.spawn = async () => { throw 'not-an-error' }
-    const r = await call(handler, 'POST', `${PET_DESKTOP_PREFIX}/spawn`, {}, mutationHeaders)
-    expect(r.status).toBe(500)
-    expect(r.body.ok).toBe(false)
-    expect(r.body.error).toBe('spawn failed')
+    expect(r.body.download).toEqual({ stage: 'downloading', pct: null })
   })
 
   it('/close without petDesktop:false does not persist the mode', async () => {
