@@ -5,6 +5,7 @@
  */
 import type { PetThemeId } from '../../shared.ts'
 import type { PetKind } from './status.ts'
+import { resolveApTheme } from './ap-themes.ts'
 
 export type BusyKind = Exclude<PetKind, 'idle'>
 
@@ -12,6 +13,7 @@ export type Sprite =
   | { type: 'image'; src: string }
   | { type: 'video'; src: string }
   | { type: 'svg'; variant: string }
+  | { type: 'ap'; themeId: string }
 
 export interface PetTheme {
   id: PetThemeId
@@ -59,20 +61,21 @@ export function pickReaction(theme: PetTheme, random: () => number = Math.random
   return pool[idx]
 }
 
-const WHALE_SPRITE: Sprite = { type: 'image', src: '/session-desk/assets/pet/whale.png' }
-
-/** DeepSeek whale theme: pixel whale PNG with a subtle CSS float. */
-export const whaleTheme: PetTheme = {
-  id: 'whale',
-  label: '鲸鱼',
-  aspect: 698 / 514,
-  idlePool: [WHALE_SPRITE],
-  busy: {
-    running: WHALE_SPRITE,
-    error: WHALE_SPRITE,
-    awaiting: WHALE_SPRITE,
-    subagent: WHALE_SPRITE,
-  },
+/** Answer-pet theme (declarative SVG + css + phases) rendered inline. */
+export function buildAnswerTheme(themeId: string): PetTheme {
+  const ap: Sprite = { type: 'ap', themeId }
+  return {
+    id: themeId as PetThemeId,
+    label: resolveApTheme(themeId).name,
+    aspect: resolveApTheme(themeId).aspect,
+    idlePool: [ap],
+    busy: {
+      running: ap,
+      error: ap,
+      awaiting: ap,
+      subagent: ap,
+    },
+  }
 }
 
 /** Custom-image theme: one image for every state (empty pool when no image). */
@@ -88,8 +91,10 @@ export function selectTheme(
   id: PetThemeId,
   customImage: string | null,
   dshpet: PetTheme,
+  apThemeIds: readonly string[],
 ): PetTheme {
+  if (apThemeIds.includes(id)) return buildAnswerTheme(id)
   if (id === 'dshpet') return dshpet
-  if (id === 'custom') return customImage === null ? whaleTheme : buildCustomTheme(customImage)
-  return whaleTheme
+  if (id === 'custom') return customImage === null ? buildAnswerTheme(apThemeIds[0] ?? 'blue-whale') : buildCustomTheme(customImage)
+  return buildAnswerTheme(apThemeIds[0] ?? 'blue-whale')
 }

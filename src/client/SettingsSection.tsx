@@ -289,9 +289,9 @@ export function SettingsSection(props: SessionDeskSectionProps): ReactNode {
                 if ((PET_THEME_IDS as readonly string[]).includes(next)) void persist({ petTheme: next })
               }}
             >
-              <option value="whale">{t('pet.theme.whale')}</option>
-              <option value="dshpet">{t('pet.theme.dshpet')}</option>
-              <option value="custom">{t('pet.theme.custom')}</option>
+              {PET_THEME_IDS.map(id => (
+                <option key={id} value={id}>{t(`pet.theme.${id}`)}</option>
+              ))}
             </select>
           </label>
           <label className="dsd-setting">

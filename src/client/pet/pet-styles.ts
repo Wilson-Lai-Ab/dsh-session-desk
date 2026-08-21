@@ -1,6 +1,7 @@
 /**
  * Pet overlay stylesheet: injected once (single client bundle, no CSS artifact).
  */
+import { apThemesCss } from './ap-themes.ts'
 
 export const STYLE_ID = 'dsh-session-desk-pet-style'
 
@@ -251,6 +252,6 @@ export function adoptPetStyles(): void {
   style.id = STYLE_ID
   style.dataset.plugin = 'dsh-session-desk'
   style.dataset.pluginCss = STYLE_ID
-  style.textContent = cssText
+  style.textContent = `${cssText}\n${apThemesCss()}`
   document.head.appendChild(style)
 }
