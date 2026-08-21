@@ -60,3 +60,41 @@ describe('DesktopPetController', () => {
     expect(exitCbs).toHaveLength(1)
   })
 })
+
+describe('DesktopPetController background download', () => {
+  it('spawn returns before the Electron download completes; downloadState tracks downloading→ready', async () => {
+    const gate: { release: (() => void) | null } = { release: null }
+    let letExeRelease: (() => void) | null = null
+    const controllerDeps = {
+      getExecutable: async () => {
+        await new Promise<void>(r => { letExeRelease = r })
+        return '/fake/electron'
+      },
+      spawn: () => ({ kill: vi.fn(), on: vi.fn(), unref: vi.fn(), stdout: null }),
+    } as never
+    const controller = createDesktopPetController(controllerDeps)
+
+    const p = controller.spawn('http://127.0.0.1:3080', 'tok')
+    // 未等下载完成即观察到 downloading（spawn 已非阻塞启动后台）
+    expect(controller.downloadState().stage).toBe('downloading')
+    // 放行下载
+    gate.release = letExeRelease
+    if (letExeRelease) letExeRelease()
+    await p
+    expect(controller.downloadState().stage).toBe('ready')
+    expect(controller.isActive()).toBe(true)
+  })
+
+  it('on executable failure, downloadState=stage:failed and spawn resolves without throwing', async () => {
+    const controller = createDesktopPetController({
+      getExecutable: async () => { throw new Error('no electron binary') },
+      spawn: vi.fn(),
+    } as never)
+    const p = controller.spawn('http://h', 't')
+    await expect(p).resolves.toBeUndefined()
+    const st = controller.downloadState()
+    expect(st.stage).toBe('failed')
+    expect(st.error).toContain('electron')
+    expect(controller.isActive()).toBe(false)
+  })
+})
