@@ -45,6 +45,7 @@ export function createDesktopPetHandler(opts: DesktopPetHandlerOptions) {
       return
     }
     if (path === `${PET_DESKTOP_PREFIX}/open`) {
+      if (token !== opts.token) { writeJson(res, 403, { ok: false, error: 'bad token' }); return }
       const id = typeof body.id === 'string' ? body.id : ''
       if (id === '') { writeJson(res, 400, { ok: false, error: 'missing id' }); return }
       opts.state.pendingOpen = { id, at: Date.now() }

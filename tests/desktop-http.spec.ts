@@ -64,7 +64,8 @@ describe('desktop-pet endpoints', () => {
 
   it('/open records the pending session and /status exposes it via shared state', async () => {
     const { handler, state } = handlerWith()
-    const r1 = await call(handler, 'POST', `${PET_DESKTOP_PREFIX}/open`, { id: 'sess-1' }, { 'x-dsh-session-desk': '1', 'content-type': 'application/json' })
+    const headers = { 'x-dsh-session-desk': '1', 'content-type': 'application/json', 'x-pet-token': 'tok' }
+    const r1 = await call(handler, 'POST', `${PET_DESKTOP_PREFIX}/open`, { id: 'sess-1' }, headers)
     expect(r1.status).toBe(200)
     expect(r1.body.ok).toBe(true)
     expect(state.pendingOpen).not.toBeNull()
@@ -75,5 +76,13 @@ describe('desktop-pet endpoints', () => {
     expect(r2.body.pendingOpen).not.toBeNull()
     expect(r2.body.pendingOpen.id).toBe('sess-1')
     expect(r2.body.pendingOpen.at).toBe(state.pendingOpen!.at)
+  })
+
+  it('/open rejects a wrong token and leaves pendingOpen unset', async () => {
+    const { handler, state } = handlerWith()
+    const r = await call(handler, 'POST', `${PET_DESKTOP_PREFIX}/open`, { id: 'sess-1' }, { 'x-dsh-session-desk': '1', 'content-type': 'application/json' })
+    expect(r.status).toBe(403)
+    expect(r.body.ok).toBe(false)
+    expect(state.pendingOpen).toBeNull()
   })
 })
