@@ -23,7 +23,7 @@ import { ApPet } from './ApPet.tsx'
 import { AP_THEME_IDS, apPhaseOf } from './ap-themes.ts'
 import { dshpetTheme } from './dshpet-assets.ts'
 import { pickReaction, resolveSprite, selectTheme, type Sprite } from './themes.ts'
-import { answerPetState, type AnswerStatusCard } from '../api.ts'
+import { answerPetState, type AnswerPetSnapshot } from '../api.ts'
 
 interface SessionRow {
   id?: string
@@ -236,7 +236,9 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
 
   const petDesktop = settings.petDesktop === true
   const [desktopActive, setDesktopActive] = useState(false)
+  const [desktopDownloading, setDesktopDownloading] = useState(false)
   const lastAckRef = useRef<number | null>(null)
+  const prevDesktopRef = useRef<boolean | null>(null)
 
   // While desktop mode is armed, poll the host /status every 1s. If an active
   // desktop window exists, hide the browser pet; also consume any pendingOpen
@@ -245,6 +247,7 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
   useEffect(() => {
     if (!petDesktop) {
       setDesktopActive(false)
+      setDesktopDownloading(false)
       lastAckRef.current = null
       return undefined
     }
@@ -258,8 +261,10 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
           ok?: boolean
           active?: boolean
           pendingOpen?: { id?: string; at?: number } | null
+          download?: { stage?: string; pct?: number | null; error?: string }
         }
         setDesktopActive(data.active === true)
+        setDesktopDownloading(data.download?.stage === 'downloading')
         const pending = data.pendingOpen
         if (
           pending &&
@@ -287,22 +292,31 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
     }
   }, [petDesktop, props.sessions])
 
-  // Re-arm the desktop pet on load if petDesktop was persisted (spec §6 step 0).
-  // Runs exactly once on mount: a GUI restart that persisted petDesktop=true
-  // should bring the desktop shell back up without the user re-clicking 桌面.
+  // Reconcile the desktop shell with the petDesktop setting. On mount a
+  // persisted petDesktop=true re-arms the shell (restart case); afterwards a
+  // settings change spawns (false→true) or closes (true→false) the shell. A
+  // failed spawn clears the flag so the user can retry from settings.
   useEffect(() => {
-    if (!petDesktop) return
+    const prev = prevDesktopRef.current
+    prevDesktopRef.current = petDesktop
+    if (prev !== null && prev === petDesktop) return
     let cancelled = false
-    void (async () => {
-      try {
-        const res = await fetch(`${PET_DESKTOP_PREFIX}/spawn`, { method: 'POST', headers: CSRF_HEADERS, body: '{}' })
-        if (!res.ok && !cancelled) void props.update?.({ petDesktop: false })
-      } catch {
-        if (!cancelled) void props.update?.({ petDesktop: false })
-      }
-    })()
+    if (petDesktop) {
+      void (async () => {
+        try {
+          const res = await fetch(`${PET_DESKTOP_PREFIX}/spawn`, { method: 'POST', headers: CSRF_HEADERS, body: '{}' })
+          if (!res.ok && !cancelled) void props.update?.({ petDesktop: false })
+        } catch {
+          if (!cancelled) void props.update?.({ petDesktop: false })
+        }
+      })()
+    } else if (prev !== null) {
+      // true→false: close the shell. Skip on mount (prev null + petDesktop
+      // false means nothing is running to close).
+      void fetch(`${PET_DESKTOP_PREFIX}/close`, { method: 'POST', headers: CSRF_HEADERS, body: JSON.stringify({ petDesktop: false }) })
+    }
     return () => { cancelled = true }
-  }, []) // mount only
+  }, [petDesktop])
 
   useEffect(() => {
     if (props.useSessions) return
@@ -455,14 +469,16 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
   const isAp = displaySprite.type === 'ap'
   const apThemeId = isAp ? displaySprite.themeId : null
 
-  // Answer-pet status cards (progress + trajectory) polled from the host.
-  const [apCards, setApCards] = useState<readonly AnswerStatusCard[]>([])
+  // Answer-pet live snapshot (real title + non-zero progress from session events).
+  const [apSnapshot, setApSnapshot] = useState<AnswerPetSnapshot | null>(null)
+  // #3: progress cards are collapsed by default; user expands when needed.
+  const [cardsOpen, setCardsOpen] = useState(false)
   useEffect(() => {
     let active = true
     const poll = async (): Promise<void> => {
       if (!active) return
       try {
-        setApCards(await answerPetState())
+        setApSnapshot(await answerPetState())
       } catch {
         /* host route absent → keep last */
       }
@@ -474,6 +490,8 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
       window.clearInterval(timer)
     }
   }, [])
+  // #4: only running(ish) sessions produce cards — idle sessions no longer spam the bubble.
+  const apCards = apSnapshot?.running ?? []
 
   const viewport = (): { w: number; h: number } => ({
     w: typeof window === 'undefined' ? 1280 : window.innerWidth,
@@ -489,10 +507,9 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
   const pos = dragPos ?? rest()
   livePos.current = pos
 
-  // Keep the bubble on-screen: clamp its center horizontally, and flip it below
-  // the pet when there isn't enough room above (the arrow flips via `data-below`).
+  // #5: keep the bubble on-screen and always ABOVE the pet (never flip it below).
   const calloutCenterX = Math.min(Math.max(160, pos.x + size / 2), Math.max(160, viewport().w - 160))
-  const calloutAbove = pos.y >= 220
+  const calloutAbove = true
   const calloutTop = calloutAbove ? pos.y - 12 : pos.y + petHeight + 12
 
   useEffect(() => {
@@ -591,6 +608,11 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
                 : <WhaleMark variant={displaySprite.variant} />}
         </span>
       </button>
+      {petDesktop && desktopDownloading && !desktopActive && (
+        <div className="dsd-pet__preparing">
+          {props.t?.('pet.desktop.preparing') ?? '正在准备桌面依赖…'}
+        </div>
+      )}
       <div
         className="dsd-pet__callout"
         data-kind={kind}
@@ -683,67 +705,67 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
                 ))}
               </>
             )}
-            {apCards.length > 0 && (
-              <div className="dsd-pet__cards">
-                {apCards.map(card => (
-                  <div key={card.id} className="dsd-pet__card" data-phase={card.view.phase}>
-                    <div className="dsd-pet__card__head">
-                      <span className="dsd-pet__card__title">{card.title}</span>
-                      <span className="dsd-pet__card__label">{card.view.label}</span>
-                      <span className="dsd-pet__card__pct">{Math.round(card.view.progress)}%</span>
-                    </div>
-                    <div className="dsd-pet__card__bar">
-                      <span style={{ width: `${Math.min(100, Math.max(0, card.view.progress))}%` }} />
-                    </div>
-                    <div className="dsd-pet__card__stats">
-                      <span>{card.view.outputTokens} tok</span>
-                      {card.view.rateTokS > 0 && <span>{card.view.rateTokS} tok/s</span>}
-                      <span>{(card.view.elapsedMs / 1000).toFixed(1)}s</span>
-                    </div>
-                    {card.trace.length > 0 && (
-                      <ol className="dsd-pet__card__trace">
-                        {card.trace.slice(-4).map(item => (
-                          <li key={item.id} data-status={item.status}>
-                            <span className="dsd-pet__card__dot" />
-                            <span className="dsd-pet__card__trace-label">{item.label}</span>
-                            {item.detail !== null && item.detail !== undefined && (
-                              <span className="dsd-pet__card__trace-detail">{item.detail}</span>
-                            )}
-                            <span className="dsd-pet__card__trace-time">{(item.durationMs / 1000).toFixed(1)}s</span>
-                          </li>
-                        ))}
-                      </ol>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
           </>
         )}
-        <div className="dsd-pet__callout__modes">
-          <button
-            type="button"
-            className="dsd-pet__callout__item"
-            onClick={() => {
-              void props.update?.({ petDesktop: true })
-              void fetch(`${PET_DESKTOP_PREFIX}/spawn`, { method: 'POST', headers: CSRF_HEADERS, body: '{}' })
-            }}
-          >
-            {props.t?.('pet.mode.desktop') ?? '桌面'}
-          </button>
-          <button
-            type="button"
-            className="dsd-pet__callout__item"
-            onClick={() => {
-              void props.update?.({ petDesktop: false })
-              // Body carries petDesktop:false so the desktop pet's /close persists
-              // browser mode on the host (the browser pet's own update is a no-op there).
-              void fetch(`${PET_DESKTOP_PREFIX}/close`, { method: 'POST', headers: CSRF_HEADERS, body: JSON.stringify({ petDesktop: false }) })
-            }}
-          >
-            {props.t?.('pet.mode.browser') ?? '浏览器'}
-          </button>
+        {/* Answer-pet progress cards: hoisted out of the kind branches so they render
+            whenever the live engine reports running sessions, independent of the
+            session-store `kind` (which can lag). Collapsed by default; click to expand. */}
+        {apCards.length > 0 && (
+        <div className="dsd-pet__cards">
+          {cardsOpen ? (
+            <>
+              <button
+                type="button"
+                className="dsd-pet__callout__toggle"
+                onClick={() => setCardsOpen(false)}
+              >
+                <span className="dsd-pet__callout__chevron">▾</span>
+                {props.t?.('pet.cards.hide') ?? '收起进度'}
+              </button>
+              {apCards.map(card => (
+                <div key={card.id} className="dsd-pet__card" data-phase={card.view.phase}>
+                  <div className="dsd-pet__card__head">
+                    <span className="dsd-pet__card__title">{card.title ?? card.id}</span>
+                    <span className="dsd-pet__card__label">{card.view.label}</span>
+                    <span className="dsd-pet__card__pct">{Math.round(card.view.progress)}%</span>
+                  </div>
+                  <div className="dsd-pet__card__bar">
+                    <span style={{ width: `${Math.min(100, Math.max(0, card.view.progress))}%` }} />
+                  </div>
+                  <div className="dsd-pet__card__stats">
+                    <span>{card.view.outputTokens} tok</span>
+                    {card.view.rateTokS > 0 && <span>{card.view.rateTokS} tok/s</span>}
+                    <span>{(card.view.elapsedMs / 1000).toFixed(1)}s</span>
+                  </div>
+                  {card.trace.length > 0 && (
+                    <ol className="dsd-pet__card__trace">
+                      {card.trace.slice(-4).map(item => (
+                        <li key={item.id} data-status={item.status}>
+                          <span className="dsd-pet__card__dot" />
+                          <span className="dsd-pet__card__trace-label">{item.label}</span>
+                          {item.detail !== null && item.detail !== undefined && (
+                            <span className="dsd-pet__card__trace-detail">{item.detail}</span>
+                          )}
+                          <span className="dsd-pet__card__trace-time">{(item.durationMs / 1000).toFixed(1)}s</span>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                </div>
+              ))}
+            </>
+          ) : (
+            <button
+              type="button"
+              className="dsd-pet__callout__toggle"
+              onClick={() => setCardsOpen(true)}
+            >
+              <span className="dsd-pet__callout__chevron">▸</span>
+              {props.t?.('pet.cards.show') ?? `会话进度 (${apCards.length})`}
+            </button>
+          )}
         </div>
+      )}
       </div>
     </div>,
     document.body,

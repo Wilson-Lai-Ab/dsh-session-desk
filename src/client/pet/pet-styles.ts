@@ -141,18 +141,6 @@ export const cssText = `
 .dsd-pet__callout__item:hover {
   background: rgba(255, 255, 255, 0.14);
 }
-.dsd-pet__callout__modes {
-  display: flex;
-  gap: 4px;
-  margin-top: 4px;
-  /* The idle/error callout is pointer-events:none; keep the mode switch tappable. */
-  pointer-events: auto;
-}
-.dsd-pet__callout__modes .dsd-pet__callout__item {
-  flex: 1 1 0%;
-  text-align: center;
-  padding: 3px 0;
-}
 .dsd-pet__callout::after {
   content: "";
   position: absolute;
@@ -186,6 +174,21 @@ export const cssText = `
 .dsd-pet__callout[data-below][data-kind="error"]::after { border-bottom-color: #b91c1c; }
 .dsd-pet__callout[data-below][data-kind="running"]::after { border-bottom-color: #1e3a8a; }
 .dsd-pet__callout[data-below][data-kind="subagent"]::after { border-bottom-color: #1e3a8a; }
+.dsd-pet__preparing {
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 10px);
+  translate: -50% 0;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(30, 41, 59, 0.85);
+  color: #e2e8f0;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
 .dsd-pet__cards {
   display: flex;
   flex-direction: column;
