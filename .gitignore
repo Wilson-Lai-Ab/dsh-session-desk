@@ -1,5 +1,6 @@
 node_modules
 lib
 .superpowers
+.worktrees
 *.tgz
 .DS_Store
