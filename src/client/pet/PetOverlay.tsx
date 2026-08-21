@@ -66,6 +66,15 @@ export interface PetOverlayProps {
 
 const DRAG_THRESHOLD = 4
 
+/** Desktop-shell HTTP prefix (browser bundle must not pull node: modules from src/desktop). */
+const PET_DESKTOP_PREFIX = '/session-desk/pet-desktop'
+
+/** Headers the /status poll mutations and the mode POSTs share. See src/http.ts:244. */
+const CSRF_HEADERS = {
+  'content-type': 'application/json',
+  'x-dsh-session-desk': '1',
+} as const
+
 function readListStore(list: unknown): SessionsSnapshot | undefined {
   if (list === undefined || list === null) return undefined
   try {
@@ -221,6 +230,59 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
   const scoped = props.useScope ? props.useScope(snapshot => snapshot.value) : undefined
   const settings: SessionDeskSettings = { ...DEFAULT_SETTINGS, ...(scoped ?? {}) }
   const hookedList = props.useSessions ? props.useSessions(snapshot => snapshot) : undefined
+
+  const petDesktop = settings.petDesktop === true
+  const [desktopActive, setDesktopActive] = useState(false)
+  const lastAckRef = useRef<number | null>(null)
+
+  // While desktop mode is armed, poll the host /status every 1s. If an active
+  // desktop window exists, hide the browser pet; also consume any pendingOpen
+  // the desktop shell records (open the session + ack so it isn't replayed).
+  // Dedup ack'd `at` so an in-flight poll can't double-fire sessions.open.
+  useEffect(() => {
+    if (!petDesktop) {
+      setDesktopActive(false)
+      lastAckRef.current = null
+      return undefined
+    }
+    let stopped = false
+    const poll = async (): Promise<void> => {
+      if (stopped) return
+      try {
+        const res = await fetch(`${PET_DESKTOP_PREFIX}/status`)
+        if (!res.ok) return
+        const data = (await res.json()) as {
+          ok?: boolean
+          active?: boolean
+          pendingOpen?: { id?: string; at?: number } | null
+        }
+        setDesktopActive(data.active === true)
+        const pending = data.pendingOpen
+        if (
+          pending &&
+          typeof pending.id === 'string' &&
+          typeof pending.at === 'number' &&
+          pending.at !== lastAckRef.current
+        ) {
+          lastAckRef.current = pending.at
+          void props.sessions?.open?.(pending.id)
+          void fetch(`${PET_DESKTOP_PREFIX}/ack-open`, {
+            method: 'POST',
+            headers: CSRF_HEADERS,
+            body: JSON.stringify({ at: pending.at }),
+          })
+        }
+      } catch {
+        /* keep last known state */
+      }
+    }
+    void poll()
+    const timer = window.setInterval(() => void poll(), 1000)
+    return () => {
+      stopped = true
+      window.clearInterval(timer)
+    }
+  }, [petDesktop, props.sessions])
 
   useEffect(() => {
     if (props.useSessions) return
@@ -431,6 +493,7 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
 
   if (hidden) return null
   if (typeof document === 'undefined') return null
+  if (petDesktop && desktopActive) return null
 
   return createPortal(
     <div ref={layerRef} className="dsd-pet-layer" aria-hidden={false}>
@@ -553,6 +616,28 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
             )}
           </>
         )}
+        <div className="dsd-pet__callout__modes">
+          <button
+            type="button"
+            className="dsd-pet__callout__item"
+            onClick={() => {
+              void props.update?.({ petDesktop: true })
+              void fetch(`${PET_DESKTOP_PREFIX}/spawn`, { method: 'POST', headers: CSRF_HEADERS, body: '{}' })
+            }}
+          >
+            {props.t?.('pet.mode.desktop') ?? '桌面'}
+          </button>
+          <button
+            type="button"
+            className="dsd-pet__callout__item"
+            onClick={() => {
+              void props.update?.({ petDesktop: false })
+              void fetch(`${PET_DESKTOP_PREFIX}/close`, { method: 'POST', headers: CSRF_HEADERS, body: '{}' })
+            }}
+          >
+            {props.t?.('pet.mode.browser') ?? '浏览器'}
+          </button>
+        </div>
       </div>
     </div>,
     document.body,

@@ -48,6 +48,7 @@ export const SessionDeskSettingsSchema: Schema<SessionDeskSettings> = z.object({
   historyLimit: z.number().min(0).max(120).default(DEFAULT_SETTINGS.historyLimit),
   boardTab: z.boolean().default(DEFAULT_SETTINGS.boardTab),
   petEnabled: z.boolean().default(DEFAULT_SETTINGS.petEnabled),
+  petDesktop: z.boolean().default(DEFAULT_SETTINGS.petDesktop),
   petImage: z.string().default(DEFAULT_SETTINGS.petImage),
   petTheme: z.union([...PET_THEME_IDS]).default(DEFAULT_SETTINGS.petTheme),
   petSize: z.number().min(PET_SIZE_MIN).max(PET_SIZE_MAX).default(DEFAULT_SETTINGS.petSize),

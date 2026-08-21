@@ -70,7 +70,7 @@ const update: PetOverlayProps['update'] = () => Promise.resolve()
 const openSession = (id: string): void => {
   void fetch(`${PREFIX}/open`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-pet-token': token },
+    headers: { 'content-type': 'application/json', 'x-pet-token': token, 'x-dsh-session-desk': '1' },
     body: JSON.stringify({ id }),
   })
 }

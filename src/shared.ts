@@ -65,6 +65,7 @@ export interface SessionDeskSettings {
   historyLimit: number
   boardTab: boolean
   petEnabled: boolean
+  petDesktop: boolean
   petImage: string
   petTheme: PetThemeId
   petSize: number
@@ -109,6 +110,7 @@ export const DEFAULT_SETTINGS: SessionDeskSettings = {
   historyLimit: 10,
   boardTab: true,
   petEnabled: true,
+  petDesktop: false,
   petImage: '',
   petTheme: 'whale',
   petSize: PET_SIZE_DEFAULT,

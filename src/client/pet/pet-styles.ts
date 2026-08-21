@@ -140,6 +140,18 @@ export const cssText = `
 .dsd-pet__callout__item:hover {
   background: rgba(255, 255, 255, 0.14);
 }
+.dsd-pet__callout__modes {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+  /* The idle/error callout is pointer-events:none; keep the mode switch tappable. */
+  pointer-events: auto;
+}
+.dsd-pet__callout__modes .dsd-pet__callout__item {
+  flex: 1 1 0%;
+  text-align: center;
+  padding: 3px 0;
+}
 .dsd-pet__callout::after {
   content: "";
   position: absolute;
