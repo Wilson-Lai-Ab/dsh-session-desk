@@ -98,3 +98,37 @@ export async function purge(input: { trashId: string } | { all: true }): Promise
   if (!body.ok) fail(body, 'purge failed')
   return body.data ?? {}
 }
+
+/** One answer-pet status card (progress + trajectory) for a running session. */
+export interface AnswerStatusCard {
+  id: string
+  title: string
+  view: {
+    phase: string
+    label: string
+    progress: number
+    outputTokens: number
+    inputTokens: number
+    rateTokS: number
+    elapsedMs: number
+    toolName?: string | null
+    endReason?: string | null
+    textSnippet?: string
+  }
+  trace: Array<{
+    id: string
+    kind: 'phase' | 'tool'
+    label: string
+    detail?: string | null
+    status: 'running' | 'done' | 'error'
+    durationMs: number
+  }>
+}
+
+/** Poll the answer-pet snapshot-fold state (progress + trajectory per running session). */
+export async function answerPetState(): Promise<AnswerStatusCard[]> {
+  const response = await fetch(`${PREFIX}/answer-pet/state`, { credentials: 'same-origin' })
+  const body = await readEnvelope<AnswerStatusCard[]>(response)
+  if (!body.ok || body.data === undefined) fail(body, 'answer-pet state unavailable')
+  return body.data
+}
