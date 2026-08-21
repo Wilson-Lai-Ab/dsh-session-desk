@@ -54,7 +54,7 @@ export function createDesktopPetHandler(opts: DesktopPetHandlerOptions) {
       // background and return 202 Accepted. Download progress and the final
       // ready/failed state are exposed via GET /status (downloadState).
       void opts.controller.spawn(`http://${host}`, opts.token)
-      writeJson(res, 202, { ok: true, active: false, downloading: true })
+      writeJson(res, 202, { ok: true, active: opts.controller.isActive(), downloading: true })
       return
     }
     if (path === `${PET_DESKTOP_PREFIX}/close`) {

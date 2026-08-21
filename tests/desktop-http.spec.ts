@@ -145,16 +145,13 @@ describe('desktop-pet endpoints', () => {
     expect(await statusOf(handler, 'POST', `${PET_DESKTOP_PREFIX}/renderer.js`)).toBe(403)
   })
 
-  it('/spawn returns 202 Accepted without waiting for the download', async () => {
+  it('/spawn returns 202 Accepted while the download is still in flight', async () => {
     const { handler, controller } = handlerWith()
-    let resolved = false
-    controller.spawn = async () => { await new Promise<void>(r => setTimeout(r, 60)); resolved = true }
-    const t0 = Date.now()
+    // A gate that never resolves: the handler must return 202 without awaiting it.
+    controller.spawn = async () => { await new Promise<void>(() => {}) }
     const r = await call(handler, 'POST', `${PET_DESKTOP_PREFIX}/spawn`, {}, mutationHeaders)
     expect(r.status).toBe(202)
     expect(r.body).toEqual({ ok: true, active: false, downloading: true })
-    expect(resolved).toBe(false) // did not await download completion
-    expect(Date.now() - t0).toBeLessThan(60)
   })
 
   it('/spawn 404 returns non-2xx so the client can revert', async () => {
@@ -169,6 +166,14 @@ describe('desktop-pet endpoints', () => {
     const r = await call(handler, 'GET', `${PET_DESKTOP_PREFIX}/status`)
     expect(r.status).toBe(200)
     expect(r.body.download).toEqual({ stage: 'downloading', pct: null })
+  })
+
+  it('/status exposes a failed download with its error', async () => {
+    const { handler, controller } = handlerWith()
+    ;(controller as { downloadState?: () => unknown }).downloadState = () => ({ stage: 'failed', pct: null, error: 'no electron binary' })
+    const r = await call(handler, 'GET', `${PET_DESKTOP_PREFIX}/status`)
+    expect(r.status).toBe(200)
+    expect(r.body.download).toEqual({ stage: 'failed', pct: null, error: 'no electron binary' })
   })
 
   it('/close without petDesktop:false does not persist the mode', async () => {

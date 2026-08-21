@@ -97,4 +97,42 @@ describe('DesktopPetController background download', () => {
     expect(st.error).toContain('electron')
     expect(controller.isActive()).toBe(false)
   })
+
+  it('concurrent spawn calls share one download (dedup via pending)', async () => {
+    const spawn = vi.fn().mockReturnValue({ kill: vi.fn(), on: vi.fn(), unref: vi.fn() })
+    const execCalls: unknown[] = []
+    const controller = createDesktopPetController({
+      getExecutable: async () => { execCalls.push(1); return '/fake/electron' },
+      spawn,
+    } as never)
+
+    const p1 = controller.spawn('http://127.0.0.1:3080', 'tok')
+    const p2 = controller.spawn('http://127.0.0.1:3080', 'tok')
+    await Promise.all([p1, p2])
+    expect(execCalls).toHaveLength(1) // getExecutable ran exactly once
+    expect(spawn).toHaveBeenCalledTimes(1)
+    expect(controller.isActive()).toBe(true)
+  })
+
+  it('after close, a new spawn starts a fresh download (pending cleared)', async () => {
+    const spawn = vi.fn().mockReturnValue({ kill: vi.fn(), on: vi.fn(), unref: vi.fn() })
+    const execCalls: unknown[] = []
+    const controller = createDesktopPetController({
+      getExecutable: async () => { execCalls.push(1); return '/fake/electron' },
+      spawn,
+    } as never)
+
+    await controller.spawn('http://h', 't')
+    expect(controller.isActive()).toBe(true)
+    controller.close()
+    expect(controller.downloadState().stage).toBe('idle')
+    expect(controller.isActive()).toBe(false)
+
+    // close() cleared `pending`; a fresh spawn must run the download again.
+    const p = controller.spawn('http://h', 't')
+    expect(controller.downloadState().stage).toBe('downloading')
+    await p
+    expect(execCalls).toHaveLength(2)
+    expect(controller.isActive()).toBe(true)
+  })
 })

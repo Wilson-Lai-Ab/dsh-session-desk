@@ -252,6 +252,7 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
       return undefined
     }
     let stopped = false
+    let revertedOnFailed = false
     const poll = async (): Promise<void> => {
       if (stopped) return
       try {
@@ -265,6 +266,13 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
         }
         setDesktopActive(data.active === true)
         setDesktopDownloading(data.download?.stage === 'downloading')
+        // A definite background download failure is the clear-failure the
+        // switch must surface: revert to browser mode once so the user can
+        // retry. The revert flows through reconcile → /close (resets pending).
+        if (data.download?.stage === 'failed' && !revertedOnFailed) {
+          revertedOnFailed = true
+          void props.update?.({ petDesktop: false })
+        }
         const pending = data.pendingOpen
         if (
           pending &&
@@ -307,7 +315,10 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
           const res = await fetch(`${PET_DESKTOP_PREFIX}/spawn`, { method: 'POST', headers: CSRF_HEADERS, body: '{}' })
           if (!res.ok && !cancelled) void props.update?.({ petDesktop: false })
         } catch {
-          if (!cancelled) void props.update?.({ petDesktop: false })
+          // A network exception is not a definite failure: only revert when
+          // the user actively switched to desktop (prev !== null), never on
+          // mount-time jitter that would clear a persisted petDesktop.
+          if (!cancelled && prev !== null) void props.update?.({ petDesktop: false })
         }
       })()
     } else if (prev !== null) {

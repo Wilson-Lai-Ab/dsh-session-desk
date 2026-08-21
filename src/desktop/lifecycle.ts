@@ -65,7 +65,10 @@ export function createDesktopPetController(deps?: Deps): DesktopPetController {
 
   function begin(baseUrl: string, token: string): Promise<void> {
     if (pending) return pending
-    pending = launch(baseUrl, token)
+    // Clear `pending` after the launch settles (success OR failure) so a later
+    // /spawn (re-mount, HMR, another tab) starts a fresh attempt instead of
+    // returning the settled promise.
+    pending = launch(baseUrl, token).finally(() => { pending = null })
     return pending
   }
 
@@ -81,6 +84,8 @@ export function createDesktopPetController(deps?: Deps): DesktopPetController {
     },
     isActive(): boolean { return active },
     downloadState(): DownloadState {
+      // pct is reserved for a future byte-level download progress; Electron
+      // downloads are reported as indeterminate (stage + error only).
       return { stage, pct: null, ...(errorMsg !== undefined ? { error: errorMsg } : {}) }
     },
     onExit(cb: () => void): () => void {
