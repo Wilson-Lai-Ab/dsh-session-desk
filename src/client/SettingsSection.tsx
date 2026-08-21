@@ -63,6 +63,9 @@ function fallbackT(key: SessionDeskKey, vars?: Record<string, string | number>):
     'history.limit': '显示条数（0 为全部，最多 120）',
     'board.enabled': '在对话页显示看板 Tab',
     'pet.enabled': '显示小宠物',
+    'pet.mode': '运行位置',
+    'pet.mode.desktop': '桌面',
+    'pet.mode.browser': '浏览器',
     'pet.theme': '宠物主题',
     'pet.theme.blue-whale': '蓝鲸',
     'pet.theme.orange-cat': '橘猫',
@@ -281,6 +284,18 @@ export function SettingsSection(props: SessionDeskSectionProps): ReactNode {
                 void persist({ petEnabled: event.target.checked })
               }}
             />
+          </label>
+          <label className="dsd-setting">
+            <span>{t('pet.mode')}</span>
+            <select
+              value={settings.petDesktop ? 'desktop' : 'browser'}
+              onChange={(event: ChangeEvent<HTMLSelectElement>) => {
+                void persist({ petDesktop: event.target.value === 'desktop' })
+              }}
+            >
+              <option value="browser">{t('pet.mode.browser')}</option>
+              <option value="desktop">{t('pet.mode.desktop')}</option>
+            </select>
           </label>
           <label className="dsd-setting">
             <span>{t('pet.theme')}</span>

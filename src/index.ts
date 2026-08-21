@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url'
 import { randomUUID } from 'node:crypto'
 import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import z, { type Schema } from '@deepseek-ai/schemastery'
-import { createPetAssetHandler, createSessionDeskHandler, API_PREFIX, PET_ASSET_PREFIX } from './http.ts'
+import { createPetAssetHandler, createSessionDeskHandler, API_PREFIX, PET_ASSET_PREFIX, listedSessions, sessionIdOf } from './http.ts'
+import { createAnswerPetEngine } from './answer/engine.ts'
 import { createDesktopPetController } from './desktop/lifecycle.ts'
 import { createDesktopPetHandler, PET_DESKTOP_PREFIX } from './desktop/http.ts'
 import { resolveSessionsRoot } from './sessions-root.ts'
@@ -112,6 +113,8 @@ interface WebServerHost {
   }
   sessions?: object
   agents?: object
+  /** `ctx.on('session/event', cb)` — the harness append feed (returns disposer). */
+  on?(event: string, handler: (session: unknown, event: unknown) => void): () => void
   effect(fn: () => (() => void) | void, label?: string): void
 }
 
@@ -163,6 +166,20 @@ export function apply(ctx: unknown, config?: { sessionsRoot?: string }): void {
     retentionDays: () => clampRetention(readSettings().retentionDays),
   })
 
+  // Live answer-pet engine: folds real session/event progress → titles/cards.
+  // Only mounted when the harness exposes the event feed; otherwise the HTTP
+  // route degrades to the coarse snapshot fold (kept for older harnesses).
+  const answerPet = webHost.on !== undefined
+    ? createAnswerPetEngine({
+        on: (handler) => webHost.on!('session/event', handler),
+        effect: (disposer, label) => webHost.effect(() => disposer, label),
+        sessions: webHost.sessions,
+        seed: typeof (webHost.sessions as { get?: unknown } | undefined)?.get === 'function'
+          ? listedSessions(webHost.sessions ?? {}).map(sessionIdOf).filter((id): id is string => id !== undefined)
+          : undefined,
+      })
+    : undefined
+
   webHost.effect(() => {
     const unregister = webHost.webServer.register({
       kind: 'prefix',
@@ -172,6 +189,7 @@ export function apply(ctx: unknown, config?: { sessionsRoot?: string }): void {
         store,
         sessions: webHost.sessions ?? {},
         agents: webHost.agents,
+        answerPet,
       }),
     })
     const petAssetsDir = fileURLToPath(new URL('./assets/pet/', import.meta.url))

@@ -86,6 +86,7 @@ function mount(options?: {
 }) {
   const routes: Route[] = []
   const effects: Array<() => void> = []
+  let eventHandler: ((session: unknown, event: unknown) => void) | null = null
   const settingsValue = {
     sessionsRoot: options?.settings?.sessionsRoot ?? options?.sessionsRoot ?? '',
     retentionDays: options?.settings?.retentionDays ?? 30,
@@ -102,6 +103,10 @@ function mount(options?: {
       const cleanup = fn()
       if (typeof cleanup === 'function') effects.push(cleanup)
     },
+    on: (_event: string, handler: (session: unknown, event: unknown) => void) => {
+      eventHandler = handler
+      return () => { eventHandler = null }
+    },
     inject: (_deps: string[], callback: (scope: { settings: { register: () => { get: () => typeof settingsValue } } }) => void) => {
       callback({
         settings: {
@@ -115,6 +120,10 @@ function mount(options?: {
   if (api === undefined) throw new Error('test setup: /session-desk/api was not registered')
   return {
     api,
+    /** Push a live session/event into the answer-pet engine (host event feed). */
+    emit(sessionId: string, event: Record<string, unknown>) {
+      eventHandler?.({ id: sessionId, events: [event] }, event)
+    },
     cleanup: () => { for (const dispose of effects) dispose() },
   }
 }
@@ -285,24 +294,33 @@ describe('session-desk host HTTP', () => {
     }
   })
 
-  it('GET answer-pet/state folds the sessions snapshot into status cards', async () => {
-    const sessions = {
-      list: () => [
-        { id: 'main', title: '会话管理插件', openState: 'streaming', running: true },
-        { id: 'child', parentId: 'main', openState: 'running', running: true, origin: 'subagent' },
-        { id: 'idle-one', title: '待机会话', running: false },
-      ],
-    }
-    const { api, cleanup } = mount({ sessions })
+  it('GET answer-pet/state serves the live engine snapshot (real title + progress)', async () => {
+    const { api, emit, cleanup } = mount()
     try {
+      emit('main', { type: 'session/title', data: { title: '调研插件核心实现' }, time: 10_000 })
+      emit('main', { type: 'turn/start', data: { turn: 1 }, time: 10_000 })
+      emit('main', { type: 'step/start', data: { step: 1 }, time: 10_000 })
+      emit('main', { type: 'assistant/chunk', data: { chunk: { type: 'text-delta', text: '你好世界你好世界' } }, time: 10_100 })
+
       const res = fakeRes()
       await api(req('GET', `${ANSWER_PET_PREFIX}/state`, { host: '127.0.0.1' }), res)
       expect(res.status).toBe(200)
-      const body = JSON.parse(res.body) as { ok: true; data: Array<{ id: string; view: { phase: string } }> }
+      const body = JSON.parse(res.body) as {
+        ok: true
+        data: {
+          active: boolean
+          session: { id: string; title: string | null } | null
+          running: Array<{ id: string; title: string | null; view: { phase: string; progress: number; chunkCount: number } }>
+        }
+      }
       expect(body.ok).toBe(true)
-      // subagent child is folded away; only top-level sessions get cards
-      expect(body.data.map(card => card.id).sort()).toEqual(['idle-one', 'main'])
-      expect(body.data.find(card => card.id === 'main')?.view.phase).toBe('stream')
+      expect(body.data.active).toBe(true)
+      // real session title, not the UUID
+      expect(body.data.session?.title).toBe('调研插件核心实现')
+      // running card carries the friendly title and non-zero progress
+      const card = body.data.running.find((c) => c.id === 'main')
+      expect(card?.title).toBe('调研插件核心实现')
+      expect(card?.view.chunkCount).toBe(1)
     } finally {
       cleanup()
     }

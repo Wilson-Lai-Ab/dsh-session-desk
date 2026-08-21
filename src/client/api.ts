@@ -102,7 +102,8 @@ export async function purge(input: { trashId: string } | { all: true }): Promise
 /** One answer-pet status card (progress + trajectory) for a running session. */
 export interface AnswerStatusCard {
   id: string
-  title: string
+  /** Friendly session title (from the live session/event feed, not the UUID). */
+  title: string | null
   view: {
     phase: string
     label: string
@@ -125,10 +126,22 @@ export interface AnswerStatusCard {
   }>
 }
 
-/** Poll the answer-pet snapshot-fold state (progress + trajectory per running session). */
-export async function answerPetState(): Promise<AnswerStatusCard[]> {
+/** The live answer-pet snapshot served by /answer-pet/state. */
+export interface AnswerPetSnapshot {
+  /** Most-recently-active session's view (or idle when none). */
+  view: AnswerStatusCard['view']
+  trace: AnswerStatusCard['trace']
+  /** The active session identity, if within the activity window. */
+  session: { id: string; title: string | null; running: boolean } | null
+  /** Every running session's card (plus the active one even if briefly idle). */
+  running: AnswerStatusCard[]
+  active: boolean
+}
+
+/** Poll the live answer-pet engine (real title + non-zero progress from session events). */
+export async function answerPetState(): Promise<AnswerPetSnapshot> {
   const response = await fetch(`${PREFIX}/answer-pet/state`, { credentials: 'same-origin' })
-  const body = await readEnvelope<AnswerStatusCard[]>(response)
+  const body = await readEnvelope<AnswerPetSnapshot>(response)
   if (!body.ok || body.data === undefined) fail(body, 'answer-pet state unavailable')
   return body.data
 }

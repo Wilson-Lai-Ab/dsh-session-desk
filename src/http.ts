@@ -7,6 +7,8 @@ import { join } from 'node:path'
 import type { createTrashStore } from './trash/store.ts'
 import type { SessionsRootSource } from './sessions-root.ts'
 import { foldSnapshotRows, type AnswerSessionRow } from './answer/fold.ts'
+import { initialProgressState, deriveView } from './answer/progress.ts'
+import type { AnswerPetSnapshot } from './answer/engine.ts'
 
 export const MUTATION_HEADER = 'x-dsh-session-desk'
 export const API_PREFIX = '/session-desk/api'
@@ -43,6 +45,8 @@ export interface SessionDeskHandlerOptions {
   store: ReturnType<typeof createTrashStore>
   sessions: object
   agents?: object
+  /** Live answer-pet engine (from './answer/engine.ts'); absent → snapshot-only fallback. */
+  answerPet?: import('./answer/engine.ts').AnswerPetEngine
 }
 
 export function header(req: DeskHttpRequest, name: string): string | undefined {
@@ -138,7 +142,7 @@ function cancelLiveAgent(agents: object | undefined, id: string): void {
   }
 }
 
-function sessionIdOf(row: unknown): string | undefined {
+export function sessionIdOf(row: unknown): string | undefined {
   if (typeof row === 'string') return row
   if (row === null || typeof row !== 'object') return undefined
   const rec = row as Record<string, unknown>
@@ -330,8 +334,23 @@ export function createSessionDeskHandler(opts: SessionDeskHandlerOptions) {
         return
       }
       if (method === 'GET' && path === `${ANSWER_PET_PREFIX}/state`) {
+        if (opts.answerPet !== undefined) {
+          writeJson(res, 200, { ok: true, data: opts.answerPet.snapshot() })
+          return
+        }
+        // Older harness without the event feed: degrade to a coarse snapshot
+        // folded into the same card shape the client expects.
         const rows = listedSessions(opts.sessions) as unknown[]
-        writeJson(res, 200, { ok: true, data: foldSnapshotRows(rows as AnswerSessionRow[]) })
+        const cards = foldSnapshotRows(rows as AnswerSessionRow[])
+        const idleView = deriveView(initialProgressState())
+        const fallback: AnswerPetSnapshot = {
+          view: idleView,
+          trace: [],
+          session: null,
+          running: cards,
+          active: false,
+        }
+        writeJson(res, 200, { ok: true, data: fallback })
         return
       }
       if (method !== 'POST') {
