@@ -1,0 +1,60 @@
+import { existsSync, mkdirSync } from 'node:fs'
+import { writeFile } from 'node:fs/promises'
+import { join, dirname } from 'node:path'
+import { homedir } from 'node:os'
+import { spawnSync } from 'node:child_process'
+
+export const ELECTRON_VERSION = '31.7.7'
+
+export interface ElectronTarget {
+  platform: 'darwin' | 'win32' | 'linux'
+  arch: string
+  version: string
+  downloadUrl: string
+  exePath: string
+}
+
+function mapTarget(platform: NodeJS.Platform, arch: string): { tag: string; rel: string } {
+  const a = arch === 'arm64' ? 'arm64' : 'x64'
+  if (platform === 'darwin') return { tag: `darwin-${a}`, rel: 'Electron.app/Contents/MacOS/Electron' }
+  if (platform === 'win32') return { tag: `win32-${a}`, rel: 'electron.exe' }
+  if (platform === 'linux') return { tag: `linux-${a}`, rel: 'electron' }
+  throw new Error(`unsupported platform: ${platform}`)
+}
+
+export function detectTarget(platform: NodeJS.Platform = process.platform, arch: string = process.arch): ElectronTarget {
+  const { tag, rel } = mapTarget(platform, arch)
+  const root = join(homedir(), '.dsh-session-desk', 'electron', ELECTRON_VERSION)
+  return {
+    platform: platform as ElectronTarget['platform'],
+    arch,
+    version: ELECTRON_VERSION,
+    downloadUrl: `https://github.com/electron/electron/releases/download/v${ELECTRON_VERSION}/electron-v${ELECTRON_VERSION}-${tag}.zip`,
+    exePath: join(root, rel),
+  }
+}
+
+function extractZip(zipPath: string, destDir: string): void {
+  const r = process.platform === 'win32'
+    ? spawnSync('powershell', ['-NoProfile', '-Command', `Expand-Archive -Force -LiteralPath '${zipPath}' -DestinationPath '${destDir}'`])
+    : spawnSync('unzip', ['-o', '-q', zipPath, '-d', destDir])
+  if (r.status !== 0) throw new Error(`extract failed (${process.platform})`)
+}
+
+export async function ensureElectron(
+  target: ElectronTarget,
+  deps?: { fetch?: typeof fetch; extractZip?: (zip: string, dest: string) => void },
+): Promise<string> {
+  if (existsSync(target.exePath)) return target.exePath
+  const fetchFn = deps?.fetch ?? globalThis.fetch
+  const res = await fetchFn(target.downloadUrl)
+  if (!res.ok) throw new Error(`electron download failed: ${res.status}`)
+  const destDir = dirname(target.exePath)
+  mkdirSync(destDir, { recursive: true })
+  const zipPath = `${target.exePath}.zip`
+  await writeFile(zipPath, Buffer.from(await res.arrayBuffer()))
+  const extract = deps?.extractZip ?? extractZip
+  extract(zipPath, destDir)
+  if (!existsSync(target.exePath)) throw new Error('electron extract failed: executable not found')
+  return target.exePath
+}
