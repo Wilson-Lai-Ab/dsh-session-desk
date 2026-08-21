@@ -1,4 +1,5 @@
 import { header, routeOf, writeJson, readJsonBody, mutationAllowed, asRecord, validateLoopbackHost, listedSessions, type DeskHttpRequest, type DeskHttpResponse } from '../http.ts'
+import { readFile } from 'node:fs/promises'
 import type { SessionDeskSettings } from '../shared.ts'
 import type { DesktopPetController } from './lifecycle.ts'
 
@@ -10,6 +11,7 @@ export interface DesktopPetHandlerOptions {
   getPetSettings: () => Partial<SessionDeskSettings>
   token: string
   state: { pendingOpen: { id: string; at: number } | null }
+  shellAssets?: { rendererHtml: string; rendererJs: string }
 }
 
 export function createDesktopPetHandler(opts: DesktopPetHandlerOptions) {
@@ -18,6 +20,18 @@ export function createDesktopPetHandler(opts: DesktopPetHandlerOptions) {
     const method = (req.method ?? 'GET').toUpperCase()
     const path = routeOf(req.url)
     const token = new URL(req.url ?? '', 'http://x').searchParams.get('token') ?? header(req, 'x-pet-token') ?? ''
+
+    // Static shell assets (renderer.html + renderer.js) are GETs served before the
+    // mutation gate, mirroring createPetAssetHandler's file-read + content-type +
+    // cache-header pattern. No token required — these are inert web resources.
+    if (method === 'GET' && path === `${PET_DESKTOP_PREFIX}/renderer.html`) {
+      await serveFile(res, opts.shellAssets?.rendererHtml, 'text/html; charset=utf-8')
+      return
+    }
+    if (method === 'GET' && path === `${PET_DESKTOP_PREFIX}/renderer.js`) {
+      await serveFile(res, opts.shellAssets?.rendererJs, 'text/javascript; charset=utf-8')
+      return
+    }
 
     if (method === 'GET' && path === `${PET_DESKTOP_PREFIX}/status`) {
       writeJson(res, 200, { ok: true, active: opts.controller.isActive(), pendingOpen: opts.state.pendingOpen })
@@ -59,5 +73,21 @@ export function createDesktopPetHandler(opts: DesktopPetHandlerOptions) {
       return
     }
     writeJson(res, 404, { ok: false, error: 'not found' })
+  }
+}
+
+/** Serve a static shell file verbatim, 404 when absent. Mirrors createPetAssetHandler. */
+async function serveFile(res: DeskHttpResponse, file: string | undefined, contentType: string): Promise<void> {
+  if (file === undefined) { res.writeHead(404); res.end(); return }
+  try {
+    const body = await readFile(file)
+    res.writeHead(200, {
+      'content-type': contentType,
+      'cache-control': 'public, max-age=86400',
+    })
+    res.end(body)
+  } catch {
+    res.writeHead(404)
+    res.end()
   }
 }

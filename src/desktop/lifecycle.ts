@@ -24,7 +24,7 @@ export function createDesktopPetController(deps?: Deps): DesktopPetController {
   return {
     async spawn(baseUrl: string, token: string): Promise<void> {
       const exe = await getExecutable()
-      const mainJs = fileURLToPath(new URL('../../desktop-shell/main.mjs', import.meta.url))
+      const mainJs = fileURLToPath(new URL('./desktop/main.mjs', import.meta.url))
       child = spawnFn(exe, [mainJs, `--base=${baseUrl}`, `--token=${token}`], { stdio: 'ignore' })
       active = true
       child.on('exit', () => {

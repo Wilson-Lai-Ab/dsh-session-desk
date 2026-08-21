@@ -192,6 +192,10 @@ export function apply(ctx: unknown, config?: { sessionsRoot?: string }): void {
         },
         token: petToken,
         state: petState,
+        shellAssets: {
+          rendererHtml: fileURLToPath(new URL('./desktop/renderer.html', import.meta.url)),
+          rendererJs: fileURLToPath(new URL('./desktop-renderer.js', import.meta.url)),
+        },
       }),
     })
     const sweep = (): void => {

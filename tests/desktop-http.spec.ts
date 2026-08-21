@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, afterAll, beforeAll } from 'vitest'
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { createDesktopPetHandler, PET_DESKTOP_PREFIX } from '../src/desktop/http.ts'
 import { createDesktopPetController } from '../src/desktop/lifecycle.ts'
 
@@ -45,6 +48,24 @@ function call(handler: (req: never, res: never) => Promise<void>, method: string
     .then(() => ({ status: res.status, body: chunks.length ? JSON.parse(chunks.join('')) : null }))
 }
 
+/** Captures the status line only (for raw-binary asset routes, which JSON.parse would choke on). */
+function statusOf(handler: (req: never, res: never) => Promise<void>, method: string, path: string) {
+  const res: { status: number; writeHead: (s: number) => void; end: (b?: string) => void } = {
+    status: 0,
+    writeHead: (s: number) => { res.status = s },
+    end: () => {},
+  }
+  const req = {
+    method,
+    url: path,
+    headers: { host: '127.0.0.1:3080' },
+    [Symbol.asyncIterator]: async function* () {
+      // no body
+    },
+  }
+  return handler(req as never, res as never).then(() => res.status)
+}
+
 describe('desktop-pet endpoints', () => {
   it('GET /status returns active', async () => {
     const { handler, controller } = handlerWith()
@@ -85,4 +106,46 @@ describe('desktop-pet endpoints', () => {
     expect(r.body.ok).toBe(false)
     expect(state.pendingOpen).toBeNull()
   })
+
+  it('serves renderer.html from shellAssets', async () => {
+    writeFileSync(join(assetsDir, 'renderer.html'), '<div id="root"></div>')
+    const { handler } = handlerWith({
+      shellAssets: { rendererHtml: join(assetsDir, 'renderer.html'), rendererJs: join(assetsDir, 'renderer.js') },
+    })
+    expect(await statusOf(handler, 'GET', `${PET_DESKTOP_PREFIX}/renderer.html`)).toBe(200)
+  })
+
+  it('serves renderer.js from shellAssets', async () => {
+    writeFileSync(join(assetsDir, 'renderer.js'), '// bundle  ')
+    const { handler } = handlerWith({
+      shellAssets: { rendererHtml: join(assetsDir, 'renderer.html'), rendererJs: join(assetsDir, 'renderer.js') },
+    })
+    expect(await statusOf(handler, 'GET', `${PET_DESKTOP_PREFIX}/renderer.js`)).toBe(200)
+  })
+
+  it('404s a renderer route when shellAssets is absent', async () => {
+    const { handler } = handlerWith()
+    expect(await statusOf(handler, 'GET', `${PET_DESKTOP_PREFIX}/renderer.js`)).toBe(404)
+  })
+
+  it('404s a renderer route when the file is missing', async () => {
+    const { handler } = handlerWith({ shellAssets: { rendererHtml: join(assetsDir, 'nope.html'), rendererJs: join(assetsDir, 'nope.js') } })
+    expect(await statusOf(handler, 'GET', `${PET_DESKTOP_PREFIX}/renderer.js`)).toBe(404)
+  })
+
+  it('rejects POST to a static renderer route (mutation gate)', async () => {
+    const { handler } = handlerWith({ shellAssets: { rendererHtml: join(assetsDir, 'renderer.html'), rendererJs: join(assetsDir, 'renderer.js') } })
+    // A GET-only static route; a POST falls through to the mutation gate, which
+    // rejects the missing mutation header with 403 before reaching it.
+    expect(await statusOf(handler, 'POST', `${PET_DESKTOP_PREFIX}/renderer.js`)).toBe(403)
+  })
+})
+
+/** Shared temp dir the renderer-route tests write fixture assets into. */
+let assetsDir = ''
+beforeAll(() => {
+  assetsDir = mkdtempSync(join(tmpdir(), 'dsh-desktop-http-'))
+})
+afterAll(() => {
+  rmSync(assetsDir, { recursive: true, force: true })
 })
