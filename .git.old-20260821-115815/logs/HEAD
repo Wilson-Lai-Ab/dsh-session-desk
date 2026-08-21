@@ -1,0 +1,29 @@
+0000000000000000000000000000000000000000 00ede9fd9939847cb6262f351788a1a56b92ddd8 Wilson.Lai <Wilson.Lai@kuka.com> 1787156698 +0800	commit (initial): docs: session-desk design spec and implementation plan
+00ede9fd9939847cb6262f351788a1a56b92ddd8 00ede9fd9939847cb6262f351788a1a56b92ddd8 Wilson.Lai <Wilson.Lai@kuka.com> 1787156698 +0800	checkout: moving from main to feat/session-desk
+00ede9fd9939847cb6262f351788a1a56b92ddd8 9dae20da706f862e1b4efdbd4cc2adab41ef1c07 Wilson.Lai <Wilson.Lai@kuka.com> 1787157918 +0800	commit: feat(session-desk): resolve sessions root and lock path encoding
+9dae20da706f862e1b4efdbd4cc2adab41ef1c07 e11834ffd6d84802ad3161160c733f6e29c2ec93 Wilson.Lai <Wilson.Lai@kuka.com> 1787160446 +0800	commit: feat(session-desk): trash sessions with restore and retention sweep
+e11834ffd6d84802ad3161160c733f6e29c2ec93 a5578b0e915b41ed886e7e9522fc31387ffc7047 Wilson.Lai <Wilson.Lai@kuka.com> 1787162270 +0800	commit: feat(session-desk): hover-expand conversation minimap
+a5578b0e915b41ed886e7e9522fc31387ffc7047 94af07af9bd3206ad6bcb9b98111f43ca9f0f30a Wilson.Lai <Wilson.Lai@kuka.com> 1787197619 +0800	commit: fix(session-desk): gate minimap slots and reset loadOlder batches
+94af07af9bd3206ad6bcb9b98111f43ca9f0f30a 87071a70a8e892442fec84cace2f25c4244ae487 Wilson.Lai <Wilson.Lai@kuka.com> 1787199179 +0800	commit: feat(session-desk): board tab with model-call timings
+87071a70a8e892442fec84cace2f25c4244ae487 ced61cc12c79fba5f8a25b7ad07c02f371eadd17 Wilson.Lai <Wilson.Lai@kuka.com> 1787199533 +0800	commit: fix(session-desk): do not zero-fill workspace projection fields
+ced61cc12c79fba5f8a25b7ad07c02f371eadd17 347686d864f918efbd3cfab3ff89c5fff98ebe4f Wilson.Lai <Wilson.Lai@kuka.com> 1787201790 +0800	commit: feat(session-desk): appearance theme with reviewed css hooks
+347686d864f918efbd3cfab3ff89c5fff98ebe4f a930fff12d4122250a09dbe20f614b4a476b560e Wilson.Lai <Wilson.Lai@kuka.com> 1787202663 +0800	commit: fix(session-desk): appearance reset, F2 exit, preview, sanitize
+a930fff12d4122250a09dbe20f614b4a476b560e c58f4ec032f1b3f53cfab134a947ea578f1e756d Wilson.Lai <Wilson.Lai@kuka.com> 1787203090 +0800	commit: fix(session-desk): apply neutrals when resetting during preview
+c58f4ec032f1b3f53cfab134a947ea578f1e756d 3175cb1b94db277f537d9816d753c356535da400 Wilson.Lai <Wilson.Lai@kuka.com> 1787204207 +0800	commit: feat(session-desk): draggable status pet
+3175cb1b94db277f537d9816d753c356535da400 9e24358a631836f7deaf0f2068f88ac476c2f90c Wilson.Lai <Wilson.Lai@kuka.com> 1787206346 +0800	commit: fix(session-desk): clamp restore, dispose appearance, wire ui-slots
+9e24358a631836f7deaf0f2068f88ac476c2f90c 00ede9fd9939847cb6262f351788a1a56b92ddd8 Wilson.Lai <Wilson.Lai@kuka.com> 1787206825 +0800	checkout: moving from feat/session-desk to main
+00ede9fd9939847cb6262f351788a1a56b92ddd8 9e24358a631836f7deaf0f2068f88ac476c2f90c Wilson.Lai <Wilson.Lai@kuka.com> 1787206825 +0800	merge feat/session-desk: Fast-forward
+9e24358a631836f7deaf0f2068f88ac476c2f90c a426b5513194ec63f3c11fe1fcdd96f35b4408f1 Wilson.Lai <Wilson.Lai@kuka.com> 1787221559 +0800	commit: feat(board): carry turn on model samples and add chart data helpers
+a426b5513194ec63f3c11fe1fcdd96f35b4408f1 4d07886cba1a0460d90ba723fce922aeb8de131c Wilson.Lai <Wilson.Lai@kuka.com> 1787221693 +0800	commit: feat(board): render charts instead of plain key/value rows
+4d07886cba1a0460d90ba723fce922aeb8de131c a6bca60b6b26dab1866a843441eec1f92868d239 Wilson.Lai <Wilson.Lai@kuka.com> 1787221735 +0800	commit: feat(trash): add subagent-descendant cascade resolver
+a6bca60b6b26dab1866a843441eec1f92868d239 3204574c4c820bc1c40bb3897456a9566c3f0b49 Wilson.Lai <Wilson.Lai@kuka.com> 1787221941 +0800	commit: feat(trash): multi-member trash entry with cascade restore
+3204574c4c820bc1c40bb3897456a9566c3f0b49 86b45a9629e0dea07cdee7b87fc88e0fc4a32805 Wilson.Lai <Wilson.Lai@kuka.com> 1787222228 +0800	commit: feat(trash): sidebar footer trash entry with drag-to-delete cascade
+86b45a9629e0dea07cdee7b87fc88e0fc4a32805 9edb6d09e413c9a36a452a861f05f60c82f5bc68 Wilson.Lai <Wilson.Lai@kuka.com> 1787223546 +0800	commit: fix(review): fail-closed trash rollback, robust list snapshot, workspace bars, retention + cascade switch
+9edb6d09e413c9a36a452a861f05f60c82f5bc68 9edb6d09e413c9a36a452a861f05f60c82f5bc68 Wilson.Lai <Wilson.Lai@kuka.com> 1787223684 +0800	reset: moving to HEAD
+9edb6d09e413c9a36a452a861f05f60c82f5bc68 25ab4b9f1e9c67af42c1598e1e2e6d81802026b2 Wilson.Lai <Wilson.Lai@kuka.com> 1787223829 +0800	commit: feat(session-desk): pet, minimap, and appearance work
+25ab4b9f1e9c67af42c1598e1e2e6d81802026b2 f7996b9c6965bd22a947ab6097928afb59e278db Wilson.Lai <Wilson.Lai@kuka.com> 1787223836 +0800	commit: docs(session-desk): v2 board charts + trash design and plan
+f7996b9c6965bd22a947ab6097928afb59e278db f7996b9c6965bd22a947ab6097928afb59e278db Wilson.Lai <Wilson.Lai@kuka.com> 1787224893 +0800	reset: moving to HEAD
+f7996b9c6965bd22a947ab6097928afb59e278db 0ff7a7c52e3c0b7df196467bdb178f19883c3ea0 Wilson.Lai <Wilson.Lai@kuka.com> 1787224906 +0800	commit: fix(session-desk): re-sync workspace list after trash/restore
+0ff7a7c52e3c0b7df196467bdb178f19883c3ea0 63425181e1976d9089f68131654dc6897896a089 Wilson.Lai <Wilson.Lai@kuka.com> 1787224936 +0800	commit (amend): fix(session-desk): re-sync workspace list after trash/restore
+63425181e1976d9089f68131654dc6897896a089 e9d9d4cd50eaca945513f5c3aba066679c2523ff Wilson.Lai <Wilson.Lai@kuka.com> 1787226240 +0800	commit: feat(session-desk): close trash popover on focus loss
+e9d9d4cd50eaca945513f5c3aba066679c2523ff 630d4ee26abc5ca730f242f8434457ab00d9d7f9 Wilson.Lai <Wilson.Lai@kuka.com> 1787230036 +0800	commit: fix: detach live session/agent when trashing so it leaves the workspace

@@ -1,0 +1,10 @@
+fix: detach live session/agent when trashing so it leaves the workspace
+
+Dragging a session to trash moved its directory but left it ATTACHED in
+the host SessionStore (its agent loop stays alive while idle, so
+'running:false' hid the fact it was still entered). The session.list RPC
+reports every attached session, so the row survived the client refresh.
+
+Detach the session (and its agent, so a later restore can re-enter the
+same id) from the host stores after the move; detaching emits
+session/disposed -> host/session-removed, dropping it from the workspace.

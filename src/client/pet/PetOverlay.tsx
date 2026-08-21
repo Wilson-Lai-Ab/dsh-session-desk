@@ -1,0 +1,560 @@
+/**
+ * Draggable shell overlay pet: lists every session and opens one on click.
+ * Empty overlay area is pointer-events: none so chat stays clickable.
+ */
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import { DEFAULT_SETTINGS, clampPetSize, type SessionDeskSettings } from '../../shared.ts'
+import { adoptPetStyles } from './pet-styles.ts'
+import {
+  aggregatePetKind,
+  clampPetPosition,
+  completedRows,
+  defaultPetPosition,
+  foldPetList,
+  idlePhraseIndex,
+  resolvePetImage,
+  subagentDetailRows,
+  type FoldedPetRow,
+  type PetKind,
+} from './status.ts'
+import { WhaleMark } from './WhaleMark.tsx'
+import { dshpetTheme } from './dshpet-assets.ts'
+import { pickReaction, resolveSprite, selectTheme, type Sprite } from './themes.ts'
+
+interface SessionRow {
+  id?: string
+  sessionId?: string
+  title?: string
+  displayTitle?: string
+  openState?: string
+  running?: boolean
+  pendingInteraction?: string
+  error?: unknown
+  failed?: unknown
+  parentId?: string
+  parentSessionId?: string
+  origin?: 'subagent' | string
+}
+
+interface SessionsSnapshot {
+  current?: string
+  ids?: string[]
+  byId?: Record<string, SessionRow>
+  items?: SessionRow[]
+  jobsBySession?: Record<string, readonly { kind?: string; status?: string }[] | undefined>
+  subagentsByParent?: Record<string, { entries?: readonly { kind?: string; activity?: string }[] } | undefined>
+}
+
+interface SettingsSnapshot {
+  value?: SessionDeskSettings
+}
+
+export interface PetOverlayProps {
+  t?: (key: string, vars?: Record<string, string | number>) => string
+  useSessions?: <T>(select: (snapshot: SessionsSnapshot) => T) => T
+  useScope?: <T>(select: (snapshot: SettingsSnapshot) => T) => T
+  hooks?: { scope?: unknown }
+  sessions?: {
+    list?: unknown
+    open?: (id: string) => unknown
+    refreshSubagents?: (parentSessionId: string) => Promise<void>
+    setSubagentCatalogOpen?: (parentSessionId: string, open: boolean) => void
+  }
+  update?: (patch: Partial<SessionDeskSettings>) => Promise<void> | void
+}
+
+const DRAG_THRESHOLD = 4
+
+function readListStore(list: unknown): SessionsSnapshot | undefined {
+  if (list === undefined || list === null) return undefined
+  try {
+    if (typeof list === 'function') return list() as SessionsSnapshot
+    if (typeof list === 'object' && 'getSnapshot' in list) {
+      const snap = (list as { getSnapshot: () => unknown }).getSnapshot()
+      return snap as SessionsSnapshot
+    }
+  } catch {
+    return undefined
+  }
+  return undefined
+}
+
+function subscribeListStore(list: unknown, listener: () => void): (() => void) | undefined {
+  if (list === undefined || list === null) return undefined
+  if (typeof list === 'object' && 'subscribe' in list) {
+    const subscribe = (list as { subscribe?: (fn: () => void) => unknown }).subscribe
+    if (typeof subscribe !== 'function') return undefined
+    const off = subscribe(listener)
+    return typeof off === 'function' ? () => { off() } : undefined
+  }
+  return undefined
+}
+
+function kindLabel(kind: PetKind, t: PetOverlayProps['t']): string {
+  return t?.(`pet.kind.${kind}`) ?? kind
+}
+
+/** Speech-bubble status text: richer than the plain kind label, with a count. */
+function bubbleText(kind: PetKind, count: number, t: PetOverlayProps['t']): string {
+  return t?.(`pet.bubble.${kind}`, { n: count }) ?? kindLabel(kind, t)
+}
+
+interface BubbleRow {
+  id: string
+  text: string
+}
+
+/** Number of rotating idle-copy phrases in `pet.idle.copy.N`. */
+const IDLE_PHRASE_COUNT = 8
+
+/** Clickable rows for the list-bearing statuses (running / awaiting / subagent). */
+function bubbleRows(
+  kind: PetKind,
+  entries: readonly FoldedPetRow[],
+  subagentDetail: readonly FoldedPetRow[],
+  t: PetOverlayProps['t'],
+): BubbleRow[] {
+  if (kind === 'subagent') {
+    return subagentDetail.map(e => ({ id: e.id, text: e.title }))
+  }
+  if (kind === 'running') {
+    return entries
+      .filter(e => e.kind === 'running' || e.kind === 'subagent')
+      .map(e => ({
+        id: e.id,
+        text: `${e.title} · ${t?.(`pet.activity.${e.activity ?? 'running'}`) ?? ''}`,
+      }))
+  }
+  if (kind === 'awaiting') {
+    return entries
+      .filter(e => e.kind === kind)
+      .map(e => {
+        const request = e.tool ? (t?.('pet.awaiting.request', { tool: e.tool }) ?? '') : ''
+        return { id: e.id, text: request ? `${e.title} ${request}` : e.title }
+      })
+  }
+  return []
+}
+
+/**
+ * Two-layer video. When `src` changes, the new webm is loaded (and starts
+ * playing muted) in a hidden layer while the old one keeps showing, then the
+ * layers hard-swap once the new first frame is ready. This avoids the blank
+ * decode frame that a plain in-place `src` swap shows. Hard cut (no crossfade):
+ * dsh-pet webm carry an alpha channel, so overlapping them would ghost.
+ */
+interface PetVideoLayer {
+  src: string
+  loop: boolean
+  onEnded?: () => void
+}
+
+function PetVideo(props: { src: string; loop: boolean; onEnded?: () => void }): ReactNode {
+  const { src, loop, onEnded } = props
+  const [layers, setLayers] = useState<[PetVideoLayer | null, PetVideoLayer | null]>([
+    { src, loop, onEnded },
+    null,
+  ])
+  const [visible, setVisible] = useState(0)
+  const visibleRef = useRef(0)
+  visibleRef.current = visible
+  const refs = [useRef<HTMLVideoElement | null>(null), useRef<HTMLVideoElement | null>(null)]
+
+  useEffect(() => {
+    const vis = visibleRef.current
+    const cur = layers[vis]
+    if (cur !== null && cur.src === src && cur.loop === loop) return
+    const hidden = 1 - vis
+    setLayers(prev => {
+      const next: [PetVideoLayer | null, PetVideoLayer | null] = [prev[0], prev[1]]
+      next[hidden] = { src, loop, onEnded }
+      return next
+    })
+  }, [src, loop, onEnded])
+
+  const handleReady = (idx: number): void => {
+    if (idx === visibleRef.current) return
+    void refs[idx].current?.play().catch(() => {})
+    setVisible(idx)
+    setLayers(prev => {
+      const next: [PetVideoLayer | null, PetVideoLayer | null] = [prev[0], prev[1]]
+      next[1 - idx] = null
+      return next
+    })
+  }
+
+  return (
+    <>
+      {[0, 1].map(i => {
+        const layer = layers[i]
+        return (
+          <video
+            key={i}
+            ref={refs[i]}
+            src={layer?.src ?? undefined}
+            autoPlay
+            loop={layer?.loop ?? true}
+            muted
+            playsInline
+            onLoadedData={layer !== null ? () => handleReady(i) : undefined}
+            onEnded={i === visible && layer !== null && !layer.loop ? layer.onEnded : undefined}
+            className={i === visible ? 'dsd-pet__layer dsd-pet__layer--on' : 'dsd-pet__layer'}
+          />
+        )
+      })}
+    </>
+  )
+}
+
+export function PetOverlay(props: PetOverlayProps): ReactNode {
+  adoptPetStyles()
+  const [hidden, setHidden] = useState(false)
+  const [fallbackList, setFallbackList] = useState<SessionsSnapshot | undefined>(undefined)
+  const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null)
+  const dragging = useRef(false)
+  const moved = useRef(false)
+  const origin = useRef({ pointerX: 0, pointerY: 0, x: 0, y: 0 })
+  const livePos = useRef({ x: 0, y: 0 })
+  const layerRef = useRef<HTMLDivElement | null>(null)
+
+  const scoped = props.useScope ? props.useScope(snapshot => snapshot.value) : undefined
+  const settings: SessionDeskSettings = { ...DEFAULT_SETTINGS, ...(scoped ?? {}) }
+  const hookedList = props.useSessions ? props.useSessions(snapshot => snapshot) : undefined
+
+  useEffect(() => {
+    if (props.useSessions) return
+    try {
+      const list = props.sessions?.list
+      const pull = (): void => setFallbackList(readListStore(list))
+      pull()
+      return subscribeListStore(list, pull)
+    } catch {
+      setHidden(true)
+      return undefined
+    }
+  }, [props.sessions, props.useSessions])
+
+  const snapshot = hookedList ?? fallbackList
+  const entries = useMemo(() => {
+    try {
+      return foldPetList(snapshot)
+    } catch {
+      return []
+    }
+  }, [snapshot])
+
+  const watchIds = useMemo(() => {
+    const ids = new Set<string>()
+    if (typeof snapshot?.current === 'string' && snapshot.current !== '') ids.add(snapshot.current)
+    for (const row of entries) {
+      if (row.kind === 'running' || row.kind === 'subagent' || row.kind === 'awaiting') ids.add(row.id)
+    }
+    return [...ids].join('\0')
+  }, [entries, snapshot])
+
+  useEffect(() => {
+    const refresh = props.sessions?.refreshSubagents
+    const setCatalogOpen = props.sessions?.setSubagentCatalogOpen
+    const ids = watchIds === '' ? [] : watchIds.split('\0')
+    for (const id of ids) {
+      try {
+        setCatalogOpen?.(id, true)
+        void refresh?.(id)
+      } catch {
+        /* catalog watch is best-effort */
+      }
+    }
+    return () => {
+      for (const id of ids) {
+        try {
+          setCatalogOpen?.(id, false)
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  }, [watchIds, props.sessions])
+
+  const kind = aggregatePetKind(entries.map(row => row.kind))
+  const [celebrating, setCelebrating] = useState(false)
+  const [completedList, setCompletedList] = useState<readonly FoldedPetRow[]>([])
+  const prevEntriesRef = useRef<readonly FoldedPetRow[]>([])
+  const timerRef = useRef<number | undefined>(undefined)
+
+  // Celebrate each session as it finishes (busy → idle). New completions append to
+  // the broadcast and extend the timer; the banner clears after 8s of quiet.
+  useEffect(() => {
+    const prevEntries = prevEntriesRef.current
+    const justCompleted = completedRows(prevEntries, entries)
+    prevEntriesRef.current = entries
+
+    if (justCompleted.length === 0) return
+
+    setCompletedList(prev => {
+      const seen = new Set(prev.map(e => e.id))
+      const added = justCompleted.filter(e => !seen.has(e.id))
+      return added.length > 0 ? [...prev, ...added] : prev
+    })
+    setCelebrating(true)
+
+    if (timerRef.current !== undefined) window.clearTimeout(timerRef.current)
+    timerRef.current = window.setTimeout(() => {
+      setCelebrating(false)
+      setCompletedList([])
+      timerRef.current = undefined
+    }, 8000)
+  }, [entries])
+
+  // Clear the celebration timer on unmount.
+  useEffect(() => {
+    return () => {
+      if (timerRef.current !== undefined) window.clearTimeout(timerRef.current)
+    }
+  }, [])
+  const size = clampPetSize(settings.petSize)
+  const theme = useMemo(
+    () => selectTheme(settings.petTheme, resolvePetImage(settings.petImage), dshpetTheme),
+    [settings.petTheme, settings.petImage],
+  )
+  const petHeight = Math.round(size / theme.aspect)
+  const [idleTick, setIdleTick] = useState(0)
+  useEffect(() => {
+    if (kind !== 'idle') return
+    let timer = 0
+    const schedule = (): void => {
+      // Rotate idle copy on a random 5–60s cadence instead of a fixed interval.
+      timer = window.setTimeout(() => {
+        setIdleTick(t => t + 1)
+        schedule()
+      }, 5000 + Math.random() * 55000)
+    }
+    schedule()
+    return () => window.clearTimeout(timer)
+  }, [kind])
+  const sprite = useMemo(() => resolveSprite(theme, kind), [theme, kind, idleTick])
+  // Main sessions that are working (streaming) or orchestrating subagents.
+  const runningRows = entries.filter(e => e.kind === 'running' || e.kind === 'subagent')
+  const awaitingRows = entries.filter(e => e.kind === 'awaiting')
+  const subagentDetail = useMemo(() => subagentDetailRows(snapshot), [snapshot])
+  // Subagent list is collapsed to a summary row by default; click to expand.
+  const [subagentOpen, setSubagentOpen] = useState(false)
+  useEffect(() => {
+    if (subagentDetail.length === 0) setSubagentOpen(false)
+  }, [subagentDetail.length])
+  const [reaction, setReaction] = useState<Sprite | null>(null)
+  useEffect(() => {
+    setReaction(null)
+  }, [theme])
+  const clearReaction = useCallback(() => setReaction(null), [])
+  const displaySprite = reaction ?? sprite
+  const isReaction = reaction !== null
+
+  const viewport = (): { w: number; h: number } => ({
+    w: typeof window === 'undefined' ? 1280 : window.innerWidth,
+    h: typeof window === 'undefined' ? 720 : window.innerHeight,
+  })
+
+  const rest = (): { x: number; y: number } => {
+    const { w, h } = viewport()
+    if (settings.petX === -1 || settings.petY === -1) return defaultPetPosition(w, h, size, petHeight)
+    return clampPetPosition(settings.petX, settings.petY, size, petHeight, w, h)
+  }
+
+  const pos = dragPos ?? rest()
+  livePos.current = pos
+
+  // Keep the bubble on-screen: clamp its center horizontally, and flip it below
+  // the pet when there isn't enough room above (the arrow flips via `data-below`).
+  const calloutCenterX = Math.min(Math.max(160, pos.x + size / 2), Math.max(160, viewport().w - 160))
+  const calloutAbove = pos.y >= 220
+  const calloutTop = calloutAbove ? pos.y - 12 : pos.y + petHeight + 12
+
+  useEffect(() => {
+    if (settings.petX === -1 || settings.petY === -1) setDragPos(null)
+  }, [settings.petX, settings.petY])
+
+  useEffect(() => {
+    const onResize = (): void => {
+      if (dragging.current) return
+      setDragPos(null)
+    }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
+  const persistPosition = useCallback((x: number, y: number) => {
+    const { w, h } = viewport()
+    const next = clampPetPosition(x, y, size, petHeight, w, h)
+    void props.update?.({ petX: next.x, petY: next.y })
+  }, [props.update, size, petHeight])
+
+  const onPointerDown = (event: { pointerId: number; clientX: number; clientY: number; preventDefault(): void; currentTarget: HTMLElement }): void => {
+    event.preventDefault()
+    dragging.current = true
+    moved.current = false
+    const start = rest()
+    origin.current = { pointerX: event.clientX, pointerY: event.clientY, x: start.x, y: start.y }
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+  }
+
+  const onPointerMove = (event: { clientX: number; clientY: number }): void => {
+    if (!dragging.current) return
+    const dx = event.clientX - origin.current.pointerX
+    const dy = event.clientY - origin.current.pointerY
+    if (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD) moved.current = true
+    const { w, h } = viewport()
+    const next = clampPetPosition(origin.current.x + dx, origin.current.y + dy, size, petHeight, w, h)
+    livePos.current = next
+    setDragPos(next)
+  }
+
+  const onPointerUp = (): void => {
+    if (!dragging.current) return
+    dragging.current = false
+    const next = livePos.current
+    if (moved.current) persistPosition(next.x, next.y)
+    else {
+      const picked = pickReaction(theme)
+      if (picked !== null && picked.type === 'video') setReaction(picked)
+    }
+    setDragPos(moved.current ? next : null)
+  }
+
+  const openSession = (id: string): void => {
+    try {
+      void props.sessions?.open?.(id)
+    } catch {
+      setHidden(true)
+    }
+  }
+
+  if (hidden) return null
+  if (typeof document === 'undefined') return null
+
+  return createPortal(
+    <div ref={layerRef} className="dsd-pet-layer" aria-hidden={false}>
+      <button
+        type="button"
+        className="dsd-pet"
+        data-kind={kind}
+        aria-label={`${props.t?.('pet.title') ?? 'pet'} · ${kindLabel(kind, props.t)}`}
+        style={{ left: pos.x, top: pos.y, width: size, height: petHeight }}
+        onPointerDown={onPointerDown as never}
+        onPointerMove={onPointerMove as never}
+        onPointerUp={onPointerUp as never}
+        onPointerCancel={onPointerUp as never}
+      >
+        {/* One sprite slot: the status sprite, or a reaction overlaid through the
+            same double-buffer (so a click never shows a blank decode frame). */}
+        <span className="dsd-pet__art">
+          {displaySprite.type === 'image'
+            ? <img src={displaySprite.src} alt="" draggable={false} />
+            : displaySprite.type === 'video'
+              ? <PetVideo
+                  src={displaySprite.src}
+                  loop={!isReaction}
+                  onEnded={isReaction ? clearReaction : undefined}
+                />
+              : <WhaleMark variant={displaySprite.variant} />}
+        </span>
+      </button>
+      <div
+        className="dsd-pet__callout"
+        data-kind={kind}
+        data-below={calloutAbove ? undefined : 'true'}
+        data-celebrating={celebrating ? 'true' : undefined}
+        style={{ left: calloutCenterX, top: calloutTop }}
+      >
+        {celebrating && kind !== 'error' && kind !== 'awaiting' ? (
+          <>
+            <span className="dsd-pet__callout__head">{props.t?.('pet.bubble.completed') ?? '任务完成啦🎉'}</span>
+            {completedList.length > 0 ? (
+              completedList.map(row => (
+                <button
+                  key={row.id}
+                  type="button"
+                  className="dsd-pet__callout__item"
+                  onClick={() => openSession(row.id)}
+                >
+                  {row.title}
+                </button>
+              ))
+            ) : (
+              <span className="dsd-pet__callout__sub">{props.t?.('pet.completed.sub') ?? ''}</span>
+            )}
+          </>
+        ) : kind === 'idle' ? (
+          <>
+            <span className="dsd-pet__callout__head">{props.t?.('pet.bubble.idle') ?? '休息中'}</span>
+            <span className="dsd-pet__callout__sub">
+              {props.t?.(`pet.idle.copy.${idlePhraseIndex(idleTick, IDLE_PHRASE_COUNT) + 1}`)
+                ?? props.t?.('pet.idle.sub')
+                ?? ''}
+            </span>
+          </>
+        ) : kind === 'error' ? (
+          <>
+            <span className="dsd-pet__callout__head">{props.t?.('pet.bubble.error') ?? '连不上 DSH'}</span>
+            <span className="dsd-pet__callout__sub">{props.t?.('pet.error.hint') ?? ''}</span>
+          </>
+        ) : kind === 'awaiting' ? (
+          <>
+            <span className="dsd-pet__callout__head">{bubbleText('awaiting', awaitingRows.length, props.t)}</span>
+            {bubbleRows('awaiting', entries, subagentDetail, props.t).map(row => (
+              <button
+                key={row.id}
+                type="button"
+                className="dsd-pet__callout__item"
+                onClick={() => openSession(row.id)}
+              >
+                {row.text}
+              </button>
+            ))}
+          </>
+        ) : (
+          <>
+            {runningRows.length > 0 && (
+              <>
+                <span className="dsd-pet__callout__head">{bubbleText('running', runningRows.length, props.t)}</span>
+                {bubbleRows('running', entries, subagentDetail, props.t).map(row => (
+                  <button
+                    key={row.id}
+                    type="button"
+                    className="dsd-pet__callout__item"
+                    onClick={() => openSession(row.id)}
+                  >
+                    {row.text}
+                  </button>
+                ))}
+              </>
+            )}
+            {subagentDetail.length > 0 && (
+              <>
+                <button
+                  type="button"
+                  className="dsd-pet__callout__toggle"
+                  onClick={() => setSubagentOpen(o => !o)}
+                >
+                  <span className="dsd-pet__callout__chevron">{subagentOpen ? '▾' : '▸'}</span>
+                  {bubbleText('subagent', subagentDetail.length, props.t)}
+                </button>
+                {subagentOpen && bubbleRows('subagent', entries, subagentDetail, props.t).map(row => (
+                  <button
+                    key={row.id}
+                    type="button"
+                    className="dsd-pet__callout__item"
+                    onClick={() => openSession(row.id)}
+                  >
+                    {row.text}
+                  </button>
+                ))}
+              </>
+            )}
+          </>
+        )}
+      </div>
+    </div>,
+    document.body,
+  )
+}
