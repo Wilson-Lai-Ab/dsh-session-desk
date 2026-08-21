@@ -3,9 +3,12 @@
  */
 import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
+import { randomUUID } from 'node:crypto'
 import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import z, { type Schema } from '@deepseek-ai/schemastery'
 import { createPetAssetHandler, createSessionDeskHandler, API_PREFIX, PET_ASSET_PREFIX } from './http.ts'
+import { createDesktopPetController } from './desktop/lifecycle.ts'
+import { createDesktopPetHandler, PET_DESKTOP_PREFIX } from './desktop/http.ts'
 import { resolveSessionsRoot } from './sessions-root.ts'
 import {
   CORNER_RADIUS_LEVELS,
@@ -168,6 +171,29 @@ export function apply(ctx: unknown, config?: { sessionsRoot?: string }): void {
       path: PET_ASSET_PREFIX,
       handler: createPetAssetHandler(petAssetsDir),
     })
+    const petController = createDesktopPetController()
+    const petToken = randomUUID()
+    const petState: { pendingOpen: { id: string; at: number } | null } = { pendingOpen: null }
+    const unregisterPet = webHost.webServer.register({
+      kind: 'prefix',
+      path: PET_DESKTOP_PREFIX,
+      handler: createDesktopPetHandler({
+        sessions: webHost.sessions ?? {},
+        controller: petController,
+        getPetSettings: () => {
+          const s = readSettings()
+          return {
+            petImage: s.petImage,
+            petTheme: s.petTheme,
+            petSize: s.petSize,
+            petX: s.petX,
+            petY: s.petY,
+          }
+        },
+        token: petToken,
+        state: petState,
+      }),
+    })
     const sweep = (): void => {
       void store.sweepExpired().catch((error: unknown) => {
         const message = error instanceof Error ? error.message : String(error)
@@ -181,6 +207,7 @@ export function apply(ctx: unknown, config?: { sessionsRoot?: string }): void {
       clearInterval(timer)
       unregister()
       unregisterAssets()
+      unregisterPet()
     }
   }, 'dsh-session-desk: /session-desk/api')
 }

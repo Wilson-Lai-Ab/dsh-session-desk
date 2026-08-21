@@ -41,7 +41,7 @@ export interface SessionDeskHandlerOptions {
   agents?: object
 }
 
-function header(req: DeskHttpRequest, name: string): string | undefined {
+export function header(req: DeskHttpRequest, name: string): string | undefined {
   const raw = req.headers?.[name] ?? req.headers?.[name.toLowerCase()]
   if (Array.isArray(raw)) return raw[0]
   return raw
@@ -158,7 +158,7 @@ function cwdOf(row: unknown): string | undefined {
   return undefined
 }
 
-function listedSessions(sessions: object): unknown[] {
+export function listedSessions(sessions: object): unknown[] {
   const list = (sessions as { list?: unknown }).list
   if (typeof list !== 'function') return []
   try {
@@ -213,12 +213,12 @@ async function switchAwayIfCurrent(sessions: object, sessionId: string, cwd: str
   }
 }
 
-function writeJson(res: DeskHttpResponse, status: number, body: unknown): void {
+export function writeJson(res: DeskHttpResponse, status: number, body: unknown): void {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' })
   res.end(JSON.stringify(body))
 }
 
-async function readJsonBody(req: DeskHttpRequest): Promise<unknown> {
+export async function readJsonBody(req: DeskHttpRequest): Promise<unknown> {
   const chunks: Uint8Array[] = []
   let total = 0
   for await (const chunk of req) {
@@ -232,16 +232,16 @@ async function readJsonBody(req: DeskHttpRequest): Promise<unknown> {
   return JSON.parse(text) as unknown
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
+export function asRecord(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' ? value as Record<string, unknown> : {}
 }
 
-function routeOf(url: string | undefined): string {
+export function routeOf(url: string | undefined): string {
   const pathname = new URL(url ?? '/', 'http://dsh.internal').pathname.replace(/\/+$/, '')
   return pathname === '' ? '/' : pathname
 }
 
-function mutationAllowed(req: DeskHttpRequest): { ok: true } | { ok: false; status: number; error: string } {
+export function mutationAllowed(req: DeskHttpRequest): { ok: true } | { ok: false; status: number; error: string } {
   if (header(req, MUTATION_HEADER) !== '1') {
     return { ok: false, status: 403, error: 'forbidden mutation request' }
   }
