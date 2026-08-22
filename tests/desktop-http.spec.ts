@@ -7,10 +7,13 @@ import { createDesktopPetController } from '../src/desktop/lifecycle.ts'
 
 function handlerWith(overrides = {}) {
   const state = { pendingOpen: null as { id: string; at: number } | null }
+  let ready = false
   const controller = {
     ...createDesktopPetController(),
     spawn: async () => { controller.active = true },
     isActive: () => Boolean(controller.active),
+    isReady: () => ready,
+    markReady: () => { if (controller.active) ready = true },
   }
   const updatePetSetting = vi.fn(async () => {})
   const handler = createDesktopPetHandler({
@@ -78,6 +81,20 @@ describe('desktop-pet endpoints', () => {
     const r = await call(handler, 'GET', `${PET_DESKTOP_PREFIX}/status`)
     expect(r.status).toBe(200)
     expect(r.body.active).toBe(true)
+    expect(r.body.ready).toBe(false)
+  })
+
+  it('GET /status ready is true only after POST /ready with the pet token', async () => {
+    const { handler, controller } = handlerWith()
+    controller.spawn('http://x', 'tok').catch(() => {})
+    const before = await call(handler, 'GET', `${PET_DESKTOP_PREFIX}/status`)
+    expect(before.body.ready).toBe(false)
+    const denied = await call(handler, 'POST', `${PET_DESKTOP_PREFIX}/ready`, {}, mutationHeaders)
+    expect(denied.status).toBe(403)
+    expect((await call(handler, 'GET', `${PET_DESKTOP_PREFIX}/status`)).body.ready).toBe(false)
+    const ok = await call(handler, 'POST', `${PET_DESKTOP_PREFIX}/ready`, {}, { ...mutationHeaders, 'x-pet-token': 'tok' })
+    expect(ok.status).toBe(200)
+    expect((await call(handler, 'GET', `${PET_DESKTOP_PREFIX}/status`)).body.ready).toBe(true)
   })
 
   it('rejects a non-loopback host', async () => {

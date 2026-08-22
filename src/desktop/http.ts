@@ -35,7 +35,13 @@ export function createDesktopPetHandler(opts: DesktopPetHandlerOptions) {
     }
 
     if (method === 'GET' && path === `${PET_DESKTOP_PREFIX}/status`) {
-      writeJson(res, 200, { ok: true, active: opts.controller.isActive(), pendingOpen: opts.state.pendingOpen, download: opts.controller.downloadState() })
+      writeJson(res, 200, {
+        ok: true,
+        active: opts.controller.isActive(),
+        ready: opts.controller.isReady(),
+        pendingOpen: opts.state.pendingOpen,
+        download: opts.controller.downloadState(),
+      })
       return
     }
     if (method === 'GET' && path === `${PET_DESKTOP_PREFIX}/snapshot`) {
@@ -67,6 +73,12 @@ export function createDesktopPetHandler(opts: DesktopPetHandlerOptions) {
       await opts.updatePetSetting(patch)
       if (patch.petDesktop === false) opts.controller.close()
       writeJson(res, 200, { ok: true })
+      return
+    }
+    if (path === `${PET_DESKTOP_PREFIX}/ready`) {
+      if (token !== opts.token) { writeJson(res, 403, { ok: false, error: 'bad token' }); return }
+      opts.controller.markReady()
+      writeJson(res, 200, { ok: true, ready: opts.controller.isReady() })
       return
     }
     if (path === `${PET_DESKTOP_PREFIX}/close`) {

@@ -48,7 +48,7 @@ app.whenReady().then(() => {
   win.setAlwaysOnTop(true, 'floating')
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   win.loadURL(`${base}/session-desk/pet-desktop/renderer.html?token=${encodeURIComponent(token)}`)
-  win.once('ready-to-show', () => { win?.showInactive() })
+  win.once('ready-to-show', () => { win?.show() })
   win.on('closed', () => {
     win = null
     app.quit()

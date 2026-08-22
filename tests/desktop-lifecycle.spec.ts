@@ -22,8 +22,12 @@ describe('DesktopPetController', () => {
     expect(controller.isActive()).toBe(false)
     await controller.spawn('http://127.0.0.1:3080', 'tok')
     expect(controller.isActive()).toBe(true)
+    expect(controller.isReady()).toBe(false)
+    controller.markReady()
+    expect(controller.isReady()).toBe(true)
     controller.close()
     expect(controller.isActive()).toBe(false)
+    expect(controller.isReady()).toBe(false)
   })
 
   it('a stale exit after re-spawn does not clear the new child', async () => {

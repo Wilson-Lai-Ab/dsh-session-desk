@@ -13,6 +13,8 @@ export interface DesktopPetController {
   spawn(baseUrl: string, token: string): Promise<void>
   close(): void
   isActive(): boolean
+  isReady(): boolean
+  markReady(): void
   downloadState(): DownloadState
   onExit(cb: () => void): () => void
 }
@@ -42,6 +44,7 @@ export function createDesktopPetController(deps?: Deps): DesktopPetController {
   const killOrphans = deps?.killOrphans ?? killOrphanOverlays
   let child: ChildProcess | null = null
   let active = false
+  let ready = false
   const exitCbs = new Set<() => void>()
   let stage: DownloadStage = 'idle'
   let errorMsg: string | undefined
@@ -65,6 +68,7 @@ export function createDesktopPetController(deps?: Deps): DesktopPetController {
         // spawn, and a late exit from the old child must not null the new one.
         if (child !== spawned) return
         active = false
+        ready = false
         child = null
         // close() already nulls `child` before kill, so a SIGTERM from close is
         // ignored above. A spontaneous non-zero exit (crash / Gatekeeper) is
@@ -80,6 +84,7 @@ export function createDesktopPetController(deps?: Deps): DesktopPetController {
       stage = 'failed'
       errorMsg = error instanceof Error && error.message ? error.message : 'spawn failed'
       active = false
+      ready = false
       child = null
       // Surface the failure via downloadState(); do NOT rethrow to the caller —
       // the /spawn HTTP handler returns 202 before this resolves.
@@ -102,12 +107,15 @@ export function createDesktopPetController(deps?: Deps): DesktopPetController {
       const current = child
       child = null
       active = false
+      ready = false
       stage = 'idle'
       errorMsg = undefined
       pending = null
       current?.kill()
     },
     isActive(): boolean { return active },
+    isReady(): boolean { return ready },
+    markReady(): void { if (active) ready = true },
     downloadState(): DownloadState {
       // pct is reserved for a future byte-level download progress; Electron
       // downloads are reported as indeterminate (stage + error only).

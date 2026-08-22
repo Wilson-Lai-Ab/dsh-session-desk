@@ -259,6 +259,7 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
   const petDesktop = settings.petDesktop === true
   const inShell = props.shell === true
   const [desktopActive, setDesktopActive] = useState(false)
+  const [desktopReady, setDesktopReady] = useState(false)
   const [desktopDownloading, setDesktopDownloading] = useState(false)
   const [desktopError, setDesktopError] = useState<string | null>(null)
   const [modeMenu, setModeMenu] = useState(false)
@@ -274,6 +275,7 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
   useEffect(() => {
     if (inShell || !petDesktop) {
       setDesktopActive(false)
+      setDesktopReady(false)
       setDesktopDownloading(false)
       if (!petDesktop) setDesktopError(null)
       lastAckRef.current = null
@@ -288,10 +290,12 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
         const data = (await res.json()) as {
           ok?: boolean
           active?: boolean
+          ready?: boolean
           pendingOpen?: { id?: string; at?: number } | null
           download?: { stage?: string; pct?: number | null; error?: string }
         }
         setDesktopActive(data.active === true)
+        setDesktopReady(data.ready === true)
         setDesktopDownloading(data.download?.stage === 'downloading')
         setDesktopError(data.download?.stage === 'failed' ? (data.download.error ?? 'download failed') : null)
         const pending = data.pendingOpen
@@ -650,9 +654,9 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
 
   if (hidden) return null
   if (typeof document === 'undefined') return null
-  // Browser overlay only hides once a desktop window is actually up, so a
-  // failed/invisible shell never leaves the user with no pet at all.
-  if (!inShell && petDesktop && desktopActive) return null
+  // Hide the in-page pet only after the desktop shell heartbeats /ready —
+  // process-alive is not enough (transparent window + no Dock icon looks gone).
+  if (!inShell && petDesktop && desktopReady) return null
 
   return createPortal(
     <div ref={layerRef} className="dsd-pet-layer" data-shell={inShell ? 'true' : undefined} aria-hidden={false}>

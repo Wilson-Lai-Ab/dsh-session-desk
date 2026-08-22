@@ -37,6 +37,11 @@ async function poll(): Promise<void> {
     if (res.ok) {
       setSnapshot(await res.json())
       lastOk = true
+      void fetch(`${PREFIX}/ready`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-pet-token': token, 'x-dsh-session-desk': '1' },
+        body: '{}',
+      })
     } else if (lastOk) {
       // Server flipped to error (e.g. GUI down): surface a stale snapshot so the
       // pet renders the error state instead of freezing on the last good one.
