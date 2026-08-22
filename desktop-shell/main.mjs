@@ -45,9 +45,11 @@ app.whenReady().then(() => {
     },
   })
   win.setAlwaysOnTop(true, 'floating')
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   // Click-through by default; the renderer flips it off over the pet / bubble.
   win.setIgnoreMouseEvents(true, { forward: true })
   win.loadURL(`${base}/session-desk/pet-desktop/renderer.html?token=${encodeURIComponent(token)}`)
+  win.once('ready-to-show', () => { win?.showInactive() })
   win.on('closed', () => {
     win = null
     app.quit()

@@ -44,12 +44,19 @@ export function createDesktopPetController(deps?: Deps): DesktopPetController {
       const spawned = spawnFn(exe, [mainJs, `--base=${baseUrl}`, `--token=${token}`], { stdio: 'ignore' })
       child = spawned
       active = true
-      spawned.on('exit', () => {
+      spawned.on('exit', (code, signal) => {
         // Ignore a stale exit from an older child: close() may have raced a newer
         // spawn, and a late exit from the old child must not null the new one.
         if (child !== spawned) return
         active = false
         child = null
+        // close() already nulls `child` before kill, so a SIGTERM from close is
+        // ignored above. A spontaneous non-zero exit (crash / Gatekeeper) is
+        // the failure the settings switch must surface.
+        if ((typeof code === 'number' && code !== 0) || signal != null) {
+          stage = 'failed'
+          errorMsg = `electron exited (${code ?? signal})`
+        }
         for (const cb of exitCbs) cb()
       })
       spawned.unref?.()
@@ -75,12 +82,13 @@ export function createDesktopPetController(deps?: Deps): DesktopPetController {
   return {
     spawn: (baseUrl: string, token: string): Promise<void> => begin(baseUrl, token),
     close(): void {
-      if (child !== null) child.kill()
-      active = false
+      const current = child
       child = null
+      active = false
       stage = 'idle'
       errorMsg = undefined
       pending = null
+      current?.kill()
     },
     isActive(): boolean { return active },
     downloadState(): DownloadState {

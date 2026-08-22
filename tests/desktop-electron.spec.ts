@@ -34,10 +34,23 @@ describe('ensureElectron', () => {
     writeFileSync(t.exePath, 'x')
     const fetchSpy = vi.fn()
     const extractSpy = vi.fn()
-    const result = await ensureElectron(t, { fetch: fetchSpy, extractZip: extractSpy } as never)
+    const prepareApp = vi.fn()
+    const result = await ensureElectron(t, { fetch: fetchSpy, extractZip: extractSpy, prepareApp } as never)
     expect(result).toBe(t.exePath)
     expect(fetchSpy).not.toHaveBeenCalled()
     expect(extractSpy).not.toHaveBeenCalled()
+    expect(prepareApp).not.toHaveBeenCalled()
+  })
+
+  it('re-prepares a cached macOS .app on reuse', async () => {
+    const dir = `/tmp/dsh-pet-reuse-${Date.now()}`
+    const exePath = `${dir}/Electron.app/Contents/MacOS/Electron`
+    mkdirSync(`${dir}/Electron.app/Contents/MacOS`, { recursive: true })
+    writeFileSync(exePath, 'x')
+    const t = { version: ELECTRON_VERSION, cacheDir: dir, exePath } as ReturnType<typeof detectTarget>
+    const prepareApp = vi.fn()
+    await ensureElectron(t, { prepareApp })
+    expect(prepareApp).toHaveBeenCalledWith(`${dir}/Electron.app`)
   })
 
   it('downloads and extracts when the executable is missing', async () => {
@@ -49,6 +62,26 @@ describe('ensureElectron', () => {
     expect(result).toBe(t.exePath)
     expect(fetchSpy).toHaveBeenCalledWith(t.downloadUrl)
     expect(extractSpy).toHaveBeenCalled()
+  })
+
+  it('after extract, prepares the macOS .app (xattr / ad-hoc sign)', async () => {
+    const dir = `/tmp/dsh-pet-test-${Date.now()}`
+    const exePath = `${dir}/Electron.app/Contents/MacOS/Electron`
+    const t = {
+      version: ELECTRON_VERSION,
+      platform: 'darwin',
+      cacheDir: dir,
+      downloadUrl: 'https://example.com/e.zip',
+      exePath,
+    } as ReturnType<typeof detectTarget>
+    const download = vi.fn(async (_url: string, dest: string) => { writeFileSync(dest, 'zip') })
+    const extractSpy = vi.fn((_zip: string, dest: string) => {
+      mkdirSync(`${dest}/Electron.app/Contents/MacOS`, { recursive: true })
+      writeFileSync(exePath, 'x')
+    })
+    const prepareApp = vi.fn()
+    await ensureElectron(t, { download, extractZip: extractSpy, prepareApp })
+    expect(prepareApp).toHaveBeenCalledWith(`${dir}/Electron.app`)
   })
 
   it('streams via download() when fetch is not injected', async () => {

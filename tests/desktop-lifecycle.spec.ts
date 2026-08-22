@@ -2,10 +2,10 @@ import { describe, expect, it, vi } from 'vitest'
 import { createDesktopPetController } from '../src/desktop/lifecycle.ts'
 
 /** Builds a fake child that records its exit callback so tests can fire it later. */
-function fakeChild(slot: { exit: (() => void) | null }) {
+function fakeChild(slot: { exit: ((code?: number, signal?: string) => void) | null }) {
   const child = {
     kill: vi.fn(),
-    on: vi.fn((event: string, cb: () => void) => {
+    on: vi.fn((event: string, cb: (code?: number, signal?: string) => void) => {
       if (event === 'exit') slot.exit = cb
     }),
     unref: vi.fn(),
@@ -112,6 +112,21 @@ describe('DesktopPetController background download', () => {
     expect(execCalls).toHaveLength(1) // getExecutable ran exactly once
     expect(spawn).toHaveBeenCalledTimes(1)
     expect(controller.isActive()).toBe(true)
+  })
+
+  it('marks failed when the child exits immediately after launch', async () => {
+    const slot: { exit: ((code?: number) => void) | null } = { exit: null }
+    const controller = createDesktopPetController({
+      getExecutable: async () => '/fake/electron',
+      spawn: vi.fn().mockReturnValue(fakeChild(slot)),
+    } as never)
+    await controller.spawn('http://127.0.0.1:3080', 'tok')
+    expect(controller.isActive()).toBe(true)
+    expect(slot.exit).not.toBeNull()
+    slot.exit!(1)
+    expect(controller.isActive()).toBe(false)
+    expect(controller.downloadState().stage).toBe('failed')
+    expect(controller.downloadState().error).toMatch(/exited/i)
   })
 
   it('after close, a new spawn starts a fresh download (pending cleared)', async () => {

@@ -68,6 +68,7 @@ export interface PetOverlayProps {
 }
 
 const DRAG_THRESHOLD = 4
+const MODE_HOLD_MS = 480
 
 /** Desktop-shell HTTP prefix (browser bundle must not pull node: modules from src/desktop). */
 const PET_DESKTOP_PREFIX = '/session-desk/pet-desktop'
@@ -238,8 +239,11 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
   const [desktopActive, setDesktopActive] = useState(false)
   const [desktopDownloading, setDesktopDownloading] = useState(false)
   const [desktopError, setDesktopError] = useState<string | null>(null)
+  const [modeMenu, setModeMenu] = useState(false)
   const lastAckRef = useRef<number | null>(null)
   const prevDesktopRef = useRef<boolean | null>(null)
+  const modeHoldRef = useRef<number | undefined>(undefined)
+  const modeHoldFired = useRef(false)
 
   // While desktop mode is armed, poll the host /status every 1s. If an active
   // desktop window exists, hide the browser pet; also consume any pendingOpen
@@ -467,6 +471,7 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
   useEffect(() => {
     return () => {
       if (apBlinkTimerRef.current !== undefined) window.clearTimeout(apBlinkTimerRef.current)
+      if (modeHoldRef.current !== undefined) window.clearTimeout(modeHoldRef.current)
     }
   }, [])
   const isAp = displaySprite.type === 'ap'
@@ -534,20 +539,36 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
     void props.update?.({ petX: next.x, petY: next.y })
   }, [props.update, size, petHeight])
 
+  const clearModeHold = (): void => {
+    if (modeHoldRef.current !== undefined) {
+      window.clearTimeout(modeHoldRef.current)
+      modeHoldRef.current = undefined
+    }
+  }
+
   const onPointerDown = (event: { pointerId: number; clientX: number; clientY: number; preventDefault(): void; currentTarget: HTMLElement }): void => {
     event.preventDefault()
     dragging.current = true
     moved.current = false
+    modeHoldFired.current = false
     const start = rest()
     origin.current = { pointerX: event.clientX, pointerY: event.clientY, x: start.x, y: start.y }
     event.currentTarget.setPointerCapture?.(event.pointerId)
+    clearModeHold()
+    modeHoldRef.current = window.setTimeout(() => {
+      modeHoldFired.current = true
+      setModeMenu(true)
+    }, MODE_HOLD_MS)
   }
 
   const onPointerMove = (event: { clientX: number; clientY: number }): void => {
     if (!dragging.current) return
     const dx = event.clientX - origin.current.pointerX
     const dy = event.clientY - origin.current.pointerY
-    if (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD) moved.current = true
+    if (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD) {
+      moved.current = true
+      clearModeHold()
+    }
     const { w, h } = viewport()
     const next = clampPetPosition(origin.current.x + dx, origin.current.y + dy, size, petHeight, w, h)
     livePos.current = next
@@ -557,12 +578,16 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
   const onPointerUp = (): void => {
     if (!dragging.current) return
     dragging.current = false
+    clearModeHold()
     const next = livePos.current
     if (moved.current) persistPosition(next.x, next.y)
-    else {
-      if (displaySprite.type === 'ap') triggerApBlink()
-      const picked = pickReaction(theme)
-      if (picked !== null && picked.type === 'video') setReaction(picked)
+    else if (!modeHoldFired.current) {
+      if (modeMenu) setModeMenu(false)
+      else {
+        if (displaySprite.type === 'ap') triggerApBlink()
+        const picked = pickReaction(theme)
+        if (picked !== null && picked.type === 'video') setReaction(picked)
+      }
     }
     setDragPos(moved.current ? next : null)
   }
@@ -577,6 +602,8 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
 
   if (hidden) return null
   if (typeof document === 'undefined') return null
+  // Browser overlay only hides once a desktop window is actually up, so a
+  // failed/invisible shell never leaves the user with no pet at all.
   if (petDesktop && desktopActive) return null
 
   return createPortal(
@@ -774,34 +801,41 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
           )}
         </div>
       )}
-        <div className="dsd-pet__callout__modes">
+      </div>
+      {modeMenu && (
+        <div
+          className="dsd-pet__mode-menu"
+          style={{ left: pos.x + size / 2, top: pos.y - 8 }}
+        >
+          <span className="dsd-pet__mode-menu__title">{props.t?.('pet.mode') ?? '运行位置'}</span>
           <button
             type="button"
-            className="dsd-pet__callout__item"
+            className="dsd-pet__mode-menu__item"
+            data-selected={!petDesktop ? 'true' : undefined}
+            onClick={() => {
+              setDesktopError(null)
+              setModeMenu(false)
+              void props.update?.({ petDesktop: false })
+              void fetch(`${PET_DESKTOP_PREFIX}/close`, { method: 'POST', headers: CSRF_HEADERS, body: JSON.stringify({ petDesktop: false }) })
+            }}
+          >
+            {props.t?.('pet.mode.browser') ?? '浏览器'}
+          </button>
+          <button
+            type="button"
+            className="dsd-pet__mode-menu__item"
             data-selected={petDesktop ? 'true' : undefined}
             onClick={() => {
               setDesktopError(null)
+              setModeMenu(false)
               void props.update?.({ petDesktop: true })
-              // Always POST /spawn: if already in desktop mode after a failed
-              // download, persist is a no-op and the reconcile effect won't fire.
               void fetch(`${PET_DESKTOP_PREFIX}/spawn`, { method: 'POST', headers: CSRF_HEADERS, body: '{}' })
             }}
           >
             {props.t?.('pet.mode.desktop') ?? '桌面'}
           </button>
-          <button
-            type="button"
-            className="dsd-pet__callout__item"
-            data-selected={!petDesktop ? 'true' : undefined}
-            onClick={() => {
-              setDesktopError(null)
-              void props.update?.({ petDesktop: false })
-            }}
-          >
-            {props.t?.('pet.mode.browser') ?? '浏览器'}
-          </button>
         </div>
-      </div>
+      )}
     </div>,
     document.body,
   )

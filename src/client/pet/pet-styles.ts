@@ -141,19 +141,43 @@ export const cssText = `
 .dsd-pet__callout__item:hover {
   background: rgba(255, 255, 255, 0.14);
 }
-.dsd-pet__callout__modes {
-  display: flex;
-  gap: 4px;
-  margin-top: 6px;
+.dsd-pet__mode-menu {
+  position: fixed;
+  transform: translate(-50%, -100%);
   pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 132px;
+  padding: 8px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.92);
+  color: #fff;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.28);
+  z-index: 2;
 }
-.dsd-pet__callout__modes .dsd-pet__callout__item {
-  flex: 1 1 0%;
-  text-align: center;
-  padding: 3px 0;
+.dsd-pet__mode-menu__title {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+  padding: 0 4px 2px;
 }
-.dsd-pet__callout__modes .dsd-pet__callout__item[data-selected] {
-  background: rgba(255, 255, 255, 0.22);
+.dsd-pet__mode-menu__item {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  padding: 6px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.dsd-pet__mode-menu__item:hover,
+.dsd-pet__mode-menu__item[data-selected] {
+  background: rgba(255, 255, 255, 0.16);
 }
 .dsd-pet__callout::after {
   content: "";

@@ -43,6 +43,19 @@ function extractZip(zipPath: string, destDir: string): void {
   if (r.status !== 0) throw new Error(`extract failed (${process.platform})`)
 }
 
+/** `.../Foo.app/Contents/MacOS/Electron` → `.../Foo.app`, else null. */
+export function appBundleOf(exePath: string): string | null {
+  const marker = '.app/'
+  const idx = exePath.indexOf(marker)
+  return idx === -1 ? null : exePath.slice(0, idx + 4)
+}
+
+/** Drop Gatekeeper quarantine and ad-hoc sign so a GitHub zip can actually launch. */
+function prepareMacApp(appPath: string): void {
+  spawnSync('xattr', ['-cr', appPath], { stdio: 'ignore' })
+  spawnSync('codesign', ['--force', '--deep', '--sign', '-', appPath], { stdio: 'ignore' })
+}
+
 /** Stream the zip to disk with curl. Avoids Node fetch().arrayBuffer() which
  *  materialises ~92MB in RAM and gets `terminated` on this host. */
 function downloadWithCurl(url: string, dest: string): Promise<void> {
@@ -62,9 +75,14 @@ export async function ensureElectron(
     fetch?: typeof fetch
     extractZip?: (zip: string, dest: string) => void
     download?: (url: string, dest: string) => Promise<void>
+    prepareApp?: (appPath: string) => void
   },
 ): Promise<string> {
-  if (existsSync(target.exePath)) return target.exePath
+  if (existsSync(target.exePath)) {
+    const cached = appBundleOf(target.exePath)
+    if (cached !== null) (deps?.prepareApp ?? prepareMacApp)(cached)
+    return target.exePath
+  }
   const cacheDir = target.cacheDir ?? dirname(target.exePath)
   mkdirSync(cacheDir, { recursive: true })
   const zipPath = join(cacheDir, `${basename(target.exePath)}.zip`)
@@ -78,5 +96,7 @@ export async function ensureElectron(
   const extract = deps?.extractZip ?? extractZip
   extract(zipPath, cacheDir)
   if (!existsSync(target.exePath)) throw new Error('electron extract failed: executable not found')
+  const bundle = appBundleOf(target.exePath)
+  if (bundle !== null) (deps?.prepareApp ?? prepareMacApp)(bundle)
   return target.exePath
 }

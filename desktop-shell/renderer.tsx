@@ -86,7 +86,12 @@ const t: PetOverlayProps['t'] = (key, vars) => {
 // to the desktop beneath. `elementFromPoint` must be read on the (single) page.
 window.addEventListener('mousemove', (event) => {
   const element = document.elementFromPoint(event.clientX, event.clientY)
-  const onPet = element !== null && (element.closest('.dsd-pet') !== null || element.closest('.dsd-pet__callout') !== null)
+  const onPet = element !== null && (
+    element.closest('.dsd-pet') !== null
+    || element.closest('.dsd-pet__callout') !== null
+    || element.closest('.dsd-pet__mode-menu') !== null
+    || element.closest('.dsd-pet__preparing') !== null
+  )
   ;(window as unknown as { petDesktop?: { setIgnoreMouse(ignore: boolean): void } }).petDesktop?.setIgnoreMouse(!onPet)
 })
 
