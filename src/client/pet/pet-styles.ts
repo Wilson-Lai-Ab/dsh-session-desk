@@ -12,6 +12,11 @@ export const cssText = `
   z-index: 240;
   pointer-events: none;
 }
+.dsd-pet-layer[data-shell] .dsd-pet,
+.dsd-pet-layer[data-shell] .dsd-pet__callout,
+.dsd-pet-layer[data-shell] .dsd-pet__mode-menu {
+  pointer-events: auto;
+}
 .dsd-pet {
   position: fixed;
   box-sizing: border-box;

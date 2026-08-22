@@ -1,15 +1,9 @@
 /**
  * Electron overlay renderer for the dsh-session-desk pet.
  *
- * Runs in the desktop shell's BrowserWindow, polling the host `/snapshot`
- * endpoint every second and rendering `PetOverlay`. Also wires up:
- *  - a `mousemove` listener that toggles the window's click-through so the
- *    desktop stays clickable except over the pet / callout (via the preload
- *    bridge), and
- *  - `openSession`, which POSTs the pet token to the token-guarded `/open`.
- *
- * There is no settings-PATCH endpoint, so `update` is deliberately a no-op:
- * drag positions persist in-session only.
+ * Runs in the compact desktop window, polling `/snapshot` and rendering
+ * `PetOverlay` with `shell`. Dragging moves the native window via preload.
+ * `update` POSTs `/settings` so 桌面/浏览器 and position persist.
  */
 import { useSyncExternalStore } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -87,22 +81,6 @@ const t: PetOverlayProps['t'] = (key, vars) => {
   if (vars) for (const [name, value] of Object.entries(vars)) text = text.replaceAll(`{${name}}`, String(value))
   return text
 }
-
-// Toggle the native window's click-through. Only the pet button and its callout
-// swallow input; the rest of the transparent overlay lets the cursor pass through
-// to the desktop beneath. `elementFromPoint` must be read on the (single) page.
-window.addEventListener('mousemove', (event) => {
-  const element = document.elementFromPoint(event.clientX, event.clientY)
-  // While the long-press mode menu is open, keep the window interactive —
-  // otherwise the 8px gap between pet and menu re-enables click-through.
-  const menuOpen = document.querySelector('.dsd-pet__mode-menu') !== null
-  const onPet = menuOpen || (element !== null && (
-    element.closest('.dsd-pet') !== null
-    || element.closest('.dsd-pet__callout') !== null
-    || element.closest('.dsd-pet__preparing') !== null
-  ))
-  ;(window as unknown as { petDesktop?: { setIgnoreMouse(ignore: boolean): void } }).petDesktop?.setIgnoreMouse(!onPet)
-})
 
 function Root() {
   return (

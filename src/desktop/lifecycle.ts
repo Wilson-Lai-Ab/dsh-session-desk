@@ -1,4 +1,4 @@
-import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process'
+import { spawn as nodeSpawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { detectTarget, ensureElectron } from './electron.ts'
 
@@ -20,11 +20,20 @@ export interface DesktopPetController {
 interface Deps {
   spawn?: typeof nodeSpawn
   getExecutable?: () => Promise<string>
+  killOrphans?: () => void
+}
+
+const ORPHAN_PATTERN = 'dsh-session-desk/lib/desktop/main.mjs'
+
+function killOrphanOverlays(): void {
+  if (process.platform === 'win32') return
+  spawnSync('pkill', ['-f', ORPHAN_PATTERN], { stdio: 'ignore' })
 }
 
 export function createDesktopPetController(deps?: Deps): DesktopPetController {
   const spawnFn = deps?.spawn ?? nodeSpawn
   const getExecutable = deps?.getExecutable ?? (() => ensureElectron(detectTarget()))
+  const killOrphans = deps?.killOrphans ?? killOrphanOverlays
   let child: ChildProcess | null = null
   let active = false
   const exitCbs = new Set<() => void>()
@@ -40,6 +49,7 @@ export function createDesktopPetController(deps?: Deps): DesktopPetController {
       stage = 'downloading'
       const exe = await getExecutable()
       stage = 'ready'
+      killOrphans()
       const mainJs = fileURLToPath(new URL('./desktop/main.mjs', import.meta.url))
       const spawned = spawnFn(exe, [mainJs, `--base=${baseUrl}`, `--token=${token}`], { stdio: 'ignore' })
       child = spawned
@@ -90,6 +100,7 @@ export function createDesktopPetController(deps?: Deps): DesktopPetController {
       errorMsg = undefined
       pending = null
       current?.kill()
+      killOrphans()
     },
     isActive(): boolean { return active },
     downloadState(): DownloadState {

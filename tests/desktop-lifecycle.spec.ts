@@ -114,6 +114,19 @@ describe('DesktopPetController background download', () => {
     expect(controller.isActive()).toBe(true)
   })
 
+  it('spawn kills leftover overlay processes before launching', async () => {
+    const killOrphans = vi.fn()
+    const spawn = vi.fn().mockReturnValue({ kill: vi.fn(), on: vi.fn(), unref: vi.fn() })
+    const controller = createDesktopPetController({
+      getExecutable: async () => '/fake/electron',
+      spawn,
+      killOrphans,
+    } as never)
+    await controller.spawn('http://127.0.0.1:3080', 'tok')
+    expect(killOrphans).toHaveBeenCalledTimes(1)
+    expect(spawn).toHaveBeenCalled()
+  })
+
   it('spawn while already active does not launch a second child', async () => {
     const spawn = vi.fn().mockReturnValue({ kill: vi.fn(), on: vi.fn(), unref: vi.fn() })
     const controller = createDesktopPetController({

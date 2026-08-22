@@ -229,7 +229,7 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null)
   const dragging = useRef(false)
   const moved = useRef(false)
-  const origin = useRef({ pointerX: 0, pointerY: 0, x: 0, y: 0 })
+  const origin = useRef({ pointerX: 0, pointerY: 0, x: 0, y: 0, screenX: 0, screenY: 0 })
   const livePos = useRef({ x: 0, y: 0 })
   const layerRef = useRef<HTMLDivElement | null>(null)
 
@@ -512,6 +512,9 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
 
   const rest = (): { x: number; y: number } => {
     const { w, h } = viewport()
+    // Compact desktop window: ignore GUI petX/petY (those are screen-sized) so
+    // the sprite stays inside this window and remains hittable.
+    if (inShell) return clampPetPosition(8, h - petHeight - 8, size, petHeight, w, h)
     if (settings.petX === -1 || settings.petY === -1) return defaultPetPosition(w, h, size, petHeight)
     return clampPetPosition(settings.petX, settings.petY, size, petHeight, w, h)
   }
@@ -556,7 +559,14 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
     moved.current = false
     modeHoldFired.current = false
     const start = rest()
-    origin.current = { pointerX: event.clientX, pointerY: event.clientY, x: start.x, y: start.y }
+    origin.current = {
+      pointerX: event.clientX,
+      pointerY: event.clientY,
+      x: start.x,
+      y: start.y,
+      screenX: window.screenX,
+      screenY: window.screenY,
+    }
     event.currentTarget.setPointerCapture?.(event.pointerId)
     clearModeHold()
     modeHoldRef.current = window.setTimeout(() => {
@@ -574,6 +584,11 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
       moved.current = true
       clearModeHold()
     }
+    if (inShell) {
+      const api = (window as unknown as { petDesktop?: { moveWindow(x: number, y: number): void } }).petDesktop
+      api?.moveWindow(origin.current.screenX + dx, origin.current.screenY + dy)
+      return
+    }
     const { w, h } = viewport()
     const next = clampPetPosition(origin.current.x + dx, origin.current.y + dy, size, petHeight, w, h)
     livePos.current = next
@@ -585,7 +600,9 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
     dragging.current = false
     clearModeHold()
     const next = livePos.current
-    if (moved.current) persistPosition(next.x, next.y)
+    if (moved.current) {
+      if (!inShell) persistPosition(next.x, next.y)
+    }
     else if (!modeHoldFired.current) {
       if (modeMenu) setModeMenu(false)
       else {
@@ -612,7 +629,7 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
   if (!inShell && petDesktop && desktopActive) return null
 
   return createPortal(
-    <div ref={layerRef} className="dsd-pet-layer" aria-hidden={false}>
+    <div ref={layerRef} className="dsd-pet-layer" data-shell={inShell ? 'true' : undefined} aria-hidden={false}>
       <button
         type="button"
         className="dsd-pet"
