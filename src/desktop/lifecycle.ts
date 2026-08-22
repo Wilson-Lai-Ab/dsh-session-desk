@@ -1,4 +1,4 @@
-import { spawn as nodeSpawn, spawnSync, type ChildProcess } from 'node:child_process'
+import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { detectTarget, ensureElectron } from './electron.ts'
 
@@ -20,14 +20,20 @@ export interface DesktopPetController {
 interface Deps {
   spawn?: typeof nodeSpawn
   getExecutable?: () => Promise<string>
-  killOrphans?: () => void
+  killOrphans?: () => void | Promise<void>
 }
 
 const ORPHAN_PATTERN = 'dsh-session-desk/lib/desktop/main.mjs'
 
-function killOrphanOverlays(): void {
-  if (process.platform === 'win32') return
-  spawnSync('pkill', ['-f', ORPHAN_PATTERN], { stdio: 'ignore' })
+/** SIGTERM leftover overlays without blocking the host event loop. */
+function killOrphanOverlays(): Promise<void> {
+  if (process.platform === 'win32') return Promise.resolve()
+  return new Promise((resolve) => {
+    const child = nodeSpawn('pkill', ['-f', ORPHAN_PATTERN], { stdio: 'ignore' })
+    const done = (): void => resolve()
+    child.on('exit', done)
+    child.on('error', done)
+  })
 }
 
 export function createDesktopPetController(deps?: Deps): DesktopPetController {
@@ -49,7 +55,7 @@ export function createDesktopPetController(deps?: Deps): DesktopPetController {
       stage = 'downloading'
       const exe = await getExecutable()
       stage = 'ready'
-      killOrphans()
+      await Promise.resolve(killOrphans())
       const mainJs = fileURLToPath(new URL('./desktop/main.mjs', import.meta.url))
       const spawned = spawnFn(exe, [mainJs, `--base=${baseUrl}`, `--token=${token}`], { stdio: 'ignore' })
       child = spawned
@@ -100,7 +106,6 @@ export function createDesktopPetController(deps?: Deps): DesktopPetController {
       errorMsg = undefined
       pending = null
       current?.kill()
-      killOrphans()
     },
     isActive(): boolean { return active },
     downloadState(): DownloadState {

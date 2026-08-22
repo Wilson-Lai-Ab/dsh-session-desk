@@ -81,6 +81,25 @@ const CSRF_HEADERS = {
   'x-dsh-session-desk': '1',
 } as const
 
+/** GUI boot splash (`[data-dsh-boot]`) must finish before /spawn — a blocked
+ *  host during plugin activation leaves the page stuck on "Loading plugins…". */
+function whenWebBootIdle(run: () => void): () => void {
+  if (typeof document === 'undefined') { run(); return () => {} }
+  if (document.querySelector('[data-dsh-boot]') === null) { run(); return () => {} }
+  let cancelled = false
+  const tryRun = (): void => {
+    if (cancelled || document.querySelector('[data-dsh-boot]') !== null) return
+    observer.disconnect()
+    run()
+  }
+  const observer = new MutationObserver(tryRun)
+  observer.observe(document.documentElement, { childList: true, subtree: true })
+  return () => {
+    cancelled = true
+    observer.disconnect()
+  }
+}
+
 function readListStore(list: unknown): SessionsSnapshot | undefined {
   if (list === undefined || list === null) return undefined
   try {
@@ -312,21 +331,28 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
     prevDesktopRef.current = petDesktop
     if (prev !== null && prev === petDesktop) return
     let cancelled = false
+    let dropBootWait = (): void => {}
     if (petDesktop) {
-      void (async () => {
-        try {
-          const res = await fetch(`${PET_DESKTOP_PREFIX}/spawn`, { method: 'POST', headers: CSRF_HEADERS, body: '{}' })
-          if (!res.ok && !cancelled) setDesktopError(`spawn ${res.status}`)
-        } catch {
-          /* keep last known state; /status poll surfaces download failures */
-        }
-      })()
+      dropBootWait = whenWebBootIdle(() => {
+        if (cancelled) return
+        void (async () => {
+          try {
+            const res = await fetch(`${PET_DESKTOP_PREFIX}/spawn`, { method: 'POST', headers: CSRF_HEADERS, body: '{}' })
+            if (!res.ok && !cancelled) setDesktopError(`spawn ${res.status}`)
+          } catch {
+            /* keep last known state; /status poll surfaces download failures */
+          }
+        })()
+      })
     } else if (prev !== null) {
       // true→false: close the shell. Skip on mount (prev null + petDesktop
       // false means nothing is running to close).
       void fetch(`${PET_DESKTOP_PREFIX}/close`, { method: 'POST', headers: CSRF_HEADERS, body: JSON.stringify({ petDesktop: false }) })
     }
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+      dropBootWait()
+    }
   }, [inShell, petDesktop])
 
   useEffect(() => {
