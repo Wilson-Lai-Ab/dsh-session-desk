@@ -237,6 +237,7 @@ export function apply(ctx: unknown, config?: { sessionsRoot?: string }): void {
     timer.unref?.()
     return () => {
       clearInterval(timer)
+      petController.close()
       unregister()
       unregisterAssets()
       unregisterPet()

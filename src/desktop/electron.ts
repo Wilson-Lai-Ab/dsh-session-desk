@@ -2,7 +2,7 @@ import { existsSync, mkdirSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { join, dirname, basename } from 'node:path'
 import { homedir } from 'node:os'
-import { spawn, spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 
 export const ELECTRON_VERSION = '31.7.7'
 
@@ -36,11 +36,21 @@ export function detectTarget(platform: NodeJS.Platform = process.platform, arch:
   }
 }
 
-function extractZip(zipPath: string, destDir: string): void {
-  const r = process.platform === 'win32'
-    ? spawnSync('powershell', ['-NoProfile', '-Command', `Expand-Archive -Force -LiteralPath '${zipPath}' -DestinationPath '${destDir}'`])
-    : spawnSync('unzip', ['-o', '-q', zipPath, '-d', destDir])
-  if (r.status !== 0) throw new Error(`extract failed (${process.platform})`)
+function run(cmd: string, args: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, { stdio: 'ignore' })
+    child.on('error', reject)
+    child.on('exit', (code) => {
+      if (code === 0) resolve()
+      else reject(new Error(`${cmd} failed (${code ?? 'killed'})`))
+    })
+  })
+}
+
+function extractZip(zipPath: string, destDir: string): Promise<void> {
+  return process.platform === 'win32'
+    ? run('powershell', ['-NoProfile', '-Command', `Expand-Archive -Force -LiteralPath '${zipPath}' -DestinationPath '${destDir}'`])
+    : run('unzip', ['-o', '-q', zipPath, '-d', destDir])
 }
 
 /** `.../Foo.app/Contents/MacOS/Electron` → `.../Foo.app`, else null. */
@@ -51,21 +61,15 @@ export function appBundleOf(exePath: string): string | null {
 }
 
 /** Drop Gatekeeper quarantine and ad-hoc sign so a GitHub zip can actually launch. */
-function prepareMacApp(appPath: string): void {
-  spawnSync('xattr', ['-cr', appPath], { stdio: 'ignore' })
-  spawnSync('codesign', ['--force', '--deep', '--sign', '-', appPath], { stdio: 'ignore' })
+function prepareMacApp(appPath: string): Promise<void> {
+  return run('xattr', ['-cr', appPath]).then(() => run('codesign', ['--force', '--deep', '--sign', '-', appPath]))
 }
 
 /** Stream the zip to disk with curl. Avoids Node fetch().arrayBuffer() which
  *  materialises ~92MB in RAM and gets `terminated` on this host. */
 function downloadWithCurl(url: string, dest: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const child = spawn('curl', ['-fsSL', '--retry', '3', '--retry-delay', '2', '-o', dest, url], { stdio: 'ignore' })
-    child.on('error', reject)
-    child.on('exit', (code) => {
-      if (code === 0 && existsSync(dest)) resolve()
-      else reject(new Error(`electron download failed (curl ${code ?? 'killed'})`))
-    })
+  return run('curl', ['-fsSL', '--retry', '3', '--retry-delay', '2', '-o', dest, url]).then(() => {
+    if (!existsSync(dest)) throw new Error('electron download failed (curl wrote nothing)')
   })
 }
 
@@ -73,9 +77,9 @@ export async function ensureElectron(
   target: ElectronTarget,
   deps?: {
     fetch?: typeof fetch
-    extractZip?: (zip: string, dest: string) => void
+    extractZip?: (zip: string, dest: string) => void | Promise<void>
     download?: (url: string, dest: string) => Promise<void>
-    prepareApp?: (appPath: string) => void
+    prepareApp?: (appPath: string) => void | Promise<void>
   },
 ): Promise<string> {
   if (existsSync(target.exePath)) return target.exePath
@@ -90,9 +94,9 @@ export async function ensureElectron(
     await (deps?.download ?? downloadWithCurl)(target.downloadUrl, zipPath)
   }
   const extract = deps?.extractZip ?? extractZip
-  extract(zipPath, cacheDir)
+  await extract(zipPath, cacheDir)
   if (!existsSync(target.exePath)) throw new Error('electron extract failed: executable not found')
   const bundle = appBundleOf(target.exePath)
-  if (bundle !== null) (deps?.prepareApp ?? prepareMacApp)(bundle)
+  if (bundle !== null) await (deps?.prepareApp ?? prepareMacApp)(bundle)
   return target.exePath
 }

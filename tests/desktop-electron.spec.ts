@@ -57,7 +57,7 @@ describe('ensureElectron', () => {
     const dir = `/tmp/dsh-pet-test-${Date.now()}`
     const t = { version: ELECTRON_VERSION, cacheDir: dir, downloadUrl: 'https://example.com/e.zip', exePath: `${dir}/electron` } as ReturnType<typeof detectTarget>
     const fetchSpy = vi.fn().mockResolvedValue({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) })
-    const extractSpy = vi.fn((zip: string, dest: string) => { writeFileSync(join(dest, 'electron'), 'x') })
+    const extractSpy = vi.fn(async (zip: string, dest: string) => { writeFileSync(join(dest, 'electron'), 'x') })
     const result = await ensureElectron(t, { fetch: fetchSpy, extractZip: extractSpy } as never)
     expect(result).toBe(t.exePath)
     expect(fetchSpy).toHaveBeenCalledWith(t.downloadUrl)
@@ -75,11 +75,11 @@ describe('ensureElectron', () => {
       exePath,
     } as ReturnType<typeof detectTarget>
     const download = vi.fn(async (_url: string, dest: string) => { writeFileSync(dest, 'zip') })
-    const extractSpy = vi.fn((_zip: string, dest: string) => {
+    const extractSpy = vi.fn(async (_zip: string, dest: string) => {
       mkdirSync(`${dest}/Electron.app/Contents/MacOS`, { recursive: true })
       writeFileSync(exePath, 'x')
     })
-    const prepareApp = vi.fn()
+    const prepareApp = vi.fn(async () => {})
     await ensureElectron(t, { download, extractZip: extractSpy, prepareApp })
     expect(prepareApp).toHaveBeenCalledWith(`${dir}/Electron.app`)
   })
@@ -88,7 +88,7 @@ describe('ensureElectron', () => {
     const dir = `/tmp/dsh-pet-test-${Date.now()}`
     const t = { version: ELECTRON_VERSION, cacheDir: dir, downloadUrl: 'https://example.com/e.zip', exePath: `${dir}/electron` } as ReturnType<typeof detectTarget>
     const download = vi.fn(async (_url: string, dest: string) => { writeFileSync(dest, 'zip') })
-    const extractSpy = vi.fn((zip: string, dest: string) => { writeFileSync(join(dest, 'electron'), 'x') })
+    const extractSpy = vi.fn(async (zip: string, dest: string) => { writeFileSync(join(dest, 'electron'), 'x') })
     const result = await ensureElectron(t, { download, extractZip: extractSpy })
     expect(result).toBe(t.exePath)
     expect(download).toHaveBeenCalledWith(t.downloadUrl, expect.stringMatching(/\.zip$/))
@@ -99,7 +99,7 @@ describe('ensureElectron', () => {
     const dir = `/tmp/dsh-pet-test-${Date.now()}`
     const t = { version: ELECTRON_VERSION, cacheDir: dir, downloadUrl: 'https://example.com/e.zip', exePath: `${dir}/electron` } as ReturnType<typeof detectTarget>
     const fetchSpy = vi.fn().mockResolvedValue({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) })
-    const extractSpy = vi.fn(() => {}) // writes nothing
+    const extractSpy = vi.fn(async () => {}) // writes nothing
     await expect(ensureElectron(t, { fetch: fetchSpy, extractZip: extractSpy } as never)).rejects.toThrow(/extract/i)
   })
 })
