@@ -57,6 +57,18 @@ export function createDesktopPetHandler(opts: DesktopPetHandlerOptions) {
       writeJson(res, 202, { ok: true, active: opts.controller.isActive(), downloading: true })
       return
     }
+    if (path === `${PET_DESKTOP_PREFIX}/settings`) {
+      if (token !== opts.token) { writeJson(res, 403, { ok: false, error: 'bad token' }); return }
+      const patch: Partial<{ petDesktop: boolean; petX: number; petY: number }> = {}
+      if (typeof body.petDesktop === 'boolean') patch.petDesktop = body.petDesktop
+      if (typeof body.petX === 'number') patch.petX = body.petX
+      if (typeof body.petY === 'number') patch.petY = body.petY
+      if (Object.keys(patch).length === 0) { writeJson(res, 400, { ok: false, error: 'empty patch' }); return }
+      await opts.updatePetSetting(patch)
+      if (patch.petDesktop === false) opts.controller.close()
+      writeJson(res, 200, { ok: true })
+      return
+    }
     if (path === `${PET_DESKTOP_PREFIX}/close`) {
       opts.controller.close()
       // Persist browser mode when the desktop pet is being closed by the 浏览器

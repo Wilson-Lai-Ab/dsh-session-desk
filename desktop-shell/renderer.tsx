@@ -65,7 +65,14 @@ function useScope<T>(select: (s: { value?: Partial<SessionDeskSettings> }) => T)
   return select(snap)
 }
 
-const update: PetOverlayProps['update'] = () => Promise.resolve()
+const update: PetOverlayProps['update'] = (patch) => {
+  void fetch(`${PREFIX}/settings`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-pet-token': token, 'x-dsh-session-desk': '1' },
+    body: JSON.stringify(patch),
+  })
+  return Promise.resolve()
+}
 
 const openSession = (id: string): void => {
   void fetch(`${PREFIX}/open`, {
@@ -86,12 +93,14 @@ const t: PetOverlayProps['t'] = (key, vars) => {
 // to the desktop beneath. `elementFromPoint` must be read on the (single) page.
 window.addEventListener('mousemove', (event) => {
   const element = document.elementFromPoint(event.clientX, event.clientY)
-  const onPet = element !== null && (
+  // While the long-press mode menu is open, keep the window interactive —
+  // otherwise the 8px gap between pet and menu re-enables click-through.
+  const menuOpen = document.querySelector('.dsd-pet__mode-menu') !== null
+  const onPet = menuOpen || (element !== null && (
     element.closest('.dsd-pet') !== null
     || element.closest('.dsd-pet__callout') !== null
-    || element.closest('.dsd-pet__mode-menu') !== null
     || element.closest('.dsd-pet__preparing') !== null
-  )
+  ))
   ;(window as unknown as { petDesktop?: { setIgnoreMouse(ignore: boolean): void } }).petDesktop?.setIgnoreMouse(!onPet)
 })
 

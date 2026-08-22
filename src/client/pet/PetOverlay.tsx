@@ -562,6 +562,7 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
     modeHoldRef.current = window.setTimeout(() => {
       modeHoldFired.current = true
       setModeMenu(true)
+      ;(window as unknown as { petDesktop?: { setIgnoreMouse(ignore: boolean): void } }).petDesktop?.setIgnoreMouse(false)
     }, MODE_HOLD_MS)
   }
 
@@ -809,7 +810,7 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
       {modeMenu && (
         <div
           className="dsd-pet__mode-menu"
-          style={{ left: pos.x + size / 2, top: pos.y - 8 }}
+          style={{ left: pos.x + size / 2, top: pos.y + petHeight - 4, transform: 'translate(-50%, 0)' }}
         >
           <span className="dsd-pet__mode-menu__title">{props.t?.('pet.mode') ?? '运行位置'}</span>
           <button

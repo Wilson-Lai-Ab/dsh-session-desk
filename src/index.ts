@@ -210,6 +210,7 @@ export function apply(ctx: unknown, config?: { sessionsRoot?: string }): void {
         getPetSettings: () => {
           const s = readSettings()
           return {
+            petDesktop: s.petDesktop,
             petImage: s.petImage,
             petTheme: s.petTheme,
             petSize: s.petSize,

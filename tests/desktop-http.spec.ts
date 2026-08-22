@@ -176,6 +176,33 @@ describe('desktop-pet endpoints', () => {
     expect(r.body.download).toEqual({ stage: 'failed', pct: null, error: 'no electron binary' })
   })
 
+  it('GET /snapshot includes petDesktop so the overlay can highlight the current mode', async () => {
+    const { handler } = handlerWith({
+      getPetSettings: () => ({ petImage: 'x.png', petDesktop: true, petTheme: 'blue-whale' }),
+    })
+    const r = await call(handler, 'GET', `${PET_DESKTOP_PREFIX}/snapshot?token=tok`)
+    expect(r.status).toBe(200)
+    expect(r.body.settings.petDesktop).toBe(true)
+    expect(r.body.settings.petTheme).toBe('blue-whale')
+  })
+
+  it('POST /settings persists petDesktop via updatePetSetting', async () => {
+    const { handler, updatePetSetting } = handlerWith()
+    const r = await call(handler, 'POST', `${PET_DESKTOP_PREFIX}/settings`, { petDesktop: true }, {
+      ...mutationHeaders,
+      'x-pet-token': 'tok',
+    })
+    expect(r.status).toBe(200)
+    expect(updatePetSetting).toHaveBeenCalledWith({ petDesktop: true })
+  })
+
+  it('POST /settings rejects a wrong token', async () => {
+    const { handler, updatePetSetting } = handlerWith()
+    const r = await call(handler, 'POST', `${PET_DESKTOP_PREFIX}/settings`, { petDesktop: true }, mutationHeaders)
+    expect(r.status).toBe(403)
+    expect(updatePetSetting).not.toHaveBeenCalled()
+  })
+
   it('/close without petDesktop:false does not persist the mode', async () => {
     const { handler, updatePetSetting } = handlerWith()
     const r = await call(handler, 'POST', `${PET_DESKTOP_PREFIX}/close`, {}, mutationHeaders)

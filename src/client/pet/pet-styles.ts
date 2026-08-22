@@ -143,8 +143,9 @@ export const cssText = `
 }
 .dsd-pet__mode-menu {
   position: fixed;
-  transform: translate(-50%, -100%);
+  transform: translate(-50%, 0);
   pointer-events: auto;
+  z-index: 250;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -154,7 +155,6 @@ export const cssText = `
   background: rgba(15, 23, 42, 0.92);
   color: #fff;
   box-shadow: 0 8px 20px rgba(15, 23, 42, 0.28);
-  z-index: 2;
 }
 .dsd-pet__mode-menu__title {
   font-size: 10px;
