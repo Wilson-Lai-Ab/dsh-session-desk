@@ -114,6 +114,18 @@ describe('DesktopPetController background download', () => {
     expect(controller.isActive()).toBe(true)
   })
 
+  it('spawn while already active does not launch a second child', async () => {
+    const spawn = vi.fn().mockReturnValue({ kill: vi.fn(), on: vi.fn(), unref: vi.fn() })
+    const controller = createDesktopPetController({
+      getExecutable: async () => '/fake/electron',
+      spawn,
+    } as never)
+    await controller.spawn('http://127.0.0.1:3080', 'tok')
+    await controller.spawn('http://127.0.0.1:3080', 'tok')
+    expect(spawn).toHaveBeenCalledTimes(1)
+    expect(controller.isActive()).toBe(true)
+  })
+
   it('marks failed when the child exits immediately after launch', async () => {
     const slot: { exit: ((code?: number) => void) | null } = { exit: null }
     const controller = createDesktopPetController({

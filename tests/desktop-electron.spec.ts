@@ -42,7 +42,7 @@ describe('ensureElectron', () => {
     expect(prepareApp).not.toHaveBeenCalled()
   })
 
-  it('re-prepares a cached macOS .app on reuse', async () => {
+  it('does not re-prepare a cached macOS .app on reuse (codesign is too slow to run on every spawn)', async () => {
     const dir = `/tmp/dsh-pet-reuse-${Date.now()}`
     const exePath = `${dir}/Electron.app/Contents/MacOS/Electron`
     mkdirSync(`${dir}/Electron.app/Contents/MacOS`, { recursive: true })
@@ -50,7 +50,7 @@ describe('ensureElectron', () => {
     const t = { version: ELECTRON_VERSION, cacheDir: dir, exePath } as ReturnType<typeof detectTarget>
     const prepareApp = vi.fn()
     await ensureElectron(t, { prepareApp })
-    expect(prepareApp).toHaveBeenCalledWith(`${dir}/Electron.app`)
+    expect(prepareApp).not.toHaveBeenCalled()
   })
 
   it('downloads and extracts when the executable is missing', async () => {

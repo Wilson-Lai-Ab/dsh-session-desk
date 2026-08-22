@@ -65,6 +65,8 @@ export interface PetOverlayProps {
     setSubagentCatalogOpen?: (parentSessionId: string, open: boolean) => void
   }
   update?: (patch: Partial<SessionDeskSettings>) => Promise<void> | void
+  /** Electron overlay: never spawn extra windows, never hide the pet. */
+  shell?: boolean
 }
 
 const DRAG_THRESHOLD = 4
@@ -236,6 +238,7 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
   const hookedList = props.useSessions ? props.useSessions(snapshot => snapshot) : undefined
 
   const petDesktop = settings.petDesktop === true
+  const inShell = props.shell === true
   const [desktopActive, setDesktopActive] = useState(false)
   const [desktopDownloading, setDesktopDownloading] = useState(false)
   const [desktopError, setDesktopError] = useState<string | null>(null)
@@ -250,10 +253,10 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
   // the desktop shell records (open the session + ack so it isn't replayed).
   // Dedup ack'd `at` so an in-flight poll can't double-fire sessions.open.
   useEffect(() => {
-    if (!petDesktop) {
+    if (inShell || !petDesktop) {
       setDesktopActive(false)
       setDesktopDownloading(false)
-      setDesktopError(null)
+      if (!petDesktop) setDesktopError(null)
       lastAckRef.current = null
       return undefined
     }
@@ -297,13 +300,14 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
       stopped = true
       window.clearInterval(timer)
     }
-  }, [petDesktop, props.sessions])
+  }, [inShell, petDesktop, props.sessions])
 
   // Reconcile the desktop shell with the petDesktop setting. On mount a
   // persisted petDesktop=true re-arms the shell (restart case); afterwards a
-  // settings change spawns (false→true) or closes (true→false) the shell. A
-  // failed spawn clears the flag so the user can retry from settings.
+  // settings change spawns (false→true) or closes (true→false) the shell.
+  // The Electron overlay must never POST /spawn — that stacked extra windows.
   useEffect(() => {
+    if (inShell) return
     const prev = prevDesktopRef.current
     prevDesktopRef.current = petDesktop
     if (prev !== null && prev === petDesktop) return
@@ -323,7 +327,7 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
       void fetch(`${PET_DESKTOP_PREFIX}/close`, { method: 'POST', headers: CSRF_HEADERS, body: JSON.stringify({ petDesktop: false }) })
     }
     return () => { cancelled = true }
-  }, [petDesktop])
+  }, [inShell, petDesktop])
 
   useEffect(() => {
     if (props.useSessions) return
@@ -604,7 +608,7 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
   if (typeof document === 'undefined') return null
   // Browser overlay only hides once a desktop window is actually up, so a
   // failed/invisible shell never leaves the user with no pet at all.
-  if (petDesktop && desktopActive) return null
+  if (!inShell && petDesktop && desktopActive) return null
 
   return createPortal(
     <div ref={layerRef} className="dsd-pet-layer" aria-hidden={false}>
@@ -829,7 +833,7 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
               setDesktopError(null)
               setModeMenu(false)
               void props.update?.({ petDesktop: true })
-              void fetch(`${PET_DESKTOP_PREFIX}/spawn`, { method: 'POST', headers: CSRF_HEADERS, body: '{}' })
+              if (!inShell) void fetch(`${PET_DESKTOP_PREFIX}/spawn`, { method: 'POST', headers: CSRF_HEADERS, body: '{}' })
             }}
           >
             {props.t?.('pet.mode.desktop') ?? '桌面'}

@@ -103,6 +103,7 @@ function Root() {
       useScope={useScope as never}
       sessions={{ open: openSession }}
       update={update}
+      shell
     />
   )
 }

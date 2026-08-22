@@ -90,7 +90,7 @@ async function serveFile(res: DeskHttpResponse, file: string | undefined, conten
     const body = await readFile(file)
     res.writeHead(200, {
       'content-type': contentType,
-      'cache-control': 'public, max-age=86400',
+      'cache-control': 'no-store',
     })
     res.end(body)
   } catch {

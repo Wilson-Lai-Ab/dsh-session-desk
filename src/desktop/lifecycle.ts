@@ -71,6 +71,7 @@ export function createDesktopPetController(deps?: Deps): DesktopPetController {
   }
 
   function begin(baseUrl: string, token: string): Promise<void> {
+    if (active) return Promise.resolve()
     if (pending) return pending
     // Clear `pending` after the launch settles (success OR failure) so a later
     // /spawn (re-mount, HMR, another tab) starts a fresh attempt instead of

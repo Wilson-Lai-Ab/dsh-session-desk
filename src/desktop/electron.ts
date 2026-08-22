@@ -78,11 +78,7 @@ export async function ensureElectron(
     prepareApp?: (appPath: string) => void
   },
 ): Promise<string> {
-  if (existsSync(target.exePath)) {
-    const cached = appBundleOf(target.exePath)
-    if (cached !== null) (deps?.prepareApp ?? prepareMacApp)(cached)
-    return target.exePath
-  }
+  if (existsSync(target.exePath)) return target.exePath
   const cacheDir = target.cacheDir ?? dirname(target.exePath)
   mkdirSync(cacheDir, { recursive: true })
   const zipPath = join(cacheDir, `${basename(target.exePath)}.zip`)
