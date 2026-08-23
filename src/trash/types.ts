@@ -17,16 +17,21 @@ export interface TrashManifest {
   members?: TrashMember[]
 }
 
+/** How a trash row got there: a plugin entry, or a leftover directory with no manifest. */
+export type TrashKind = 'entry' | 'orphan'
+
 /** One live session directory under the current sessions root. */
 export interface LiveSessionRow {
   sessionId: string
   cwd: string
   path: string
   bytes: number
+  /** Size of session.jsonl.zstd or session.jsonl; 0 when missing. */
+  jsonlBytes: number
 }
 
 export type TrashResult =
-  | { ok: true; trashId: string }
+  | { ok: true; trashId: string; sessionIds: string[] }
   | { ok: false; code: 'not-found' | 'io'; message: string }
 
 export type RestoreResult =

@@ -68,6 +68,11 @@ export const cssText = `
   color: var(--dsw-alias-label-tertiary);
   margin-top: 2px;
 }
+.dsd-trash-pop__muted {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+  white-space: nowrap;
+}
 .dsd-trash-pop__row button,
 .dsd-trash-pop__all {
   border: 1px solid var(--dsw-alias-border-l2);

@@ -15,13 +15,16 @@ const token = new URLSearchParams(location.search).get('token') ?? ''
 const PREFIX = '/session-desk/pet-desktop'
 
 const EMPTY_SESSIONS = { items: [] as unknown[] }
-let snapshot: { sessions: { items: unknown[] }; settings: Partial<SessionDeskSettings> } | null = null
+let snapshot: { sessions: { items: unknown[]; answerPet?: unknown }; settings: Partial<SessionDeskSettings>; answerPet?: unknown } | null = null
 // Recomputed only inside setSnapshot so getSnapshot returns a stable reference.
+let sessionsSnapshot = EMPTY_SESSIONS as { items: unknown[]; answerPet?: unknown }
 let scopeSnapshot = { value: { ...DEFAULT_SETTINGS } as Partial<SessionDeskSettings> }
 const listeners = new Set<() => void>()
 
 function setSnapshot(next: typeof snapshot) {
   snapshot = next
+  const sessions = next?.sessions ?? EMPTY_SESSIONS
+  sessionsSnapshot = { ...sessions, answerPet: next?.answerPet ?? (sessions as { answerPet?: unknown }).answerPet }
   scopeSnapshot = { value: { ...DEFAULT_SETTINGS, ...(next?.settings ?? {}) } }
   for (const listener of listeners) listener()
 }
@@ -31,17 +34,21 @@ function subscribe(listener: () => void): () => void {
 }
 
 let lastOk = false
+let readySent = false
 async function poll(): Promise<void> {
   try {
     const res = await fetch(`${PREFIX}/snapshot?token=${encodeURIComponent(token)}`)
     if (res.ok) {
       setSnapshot(await res.json())
       lastOk = true
-      void fetch(`${PREFIX}/ready`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-pet-token': token, 'x-dsh-session-desk': '1' },
-        body: '{}',
-      })
+      if (!readySent) {
+        readySent = true
+        void fetch(`${PREFIX}/ready`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-pet-token': token, 'x-dsh-session-desk': '1' },
+          body: '{}',
+        })
+      }
     } else if (lastOk) {
       // Server flipped to error (e.g. GUI down): surface a stale snapshot so the
       // pet renders the error state instead of freezing on the last good one.
@@ -53,10 +60,29 @@ async function poll(): Promise<void> {
   }
 }
 void poll()
-const timer = setInterval(poll, 1000)
+const events = new EventSource(`${PREFIX}/events?token=${encodeURIComponent(token)}`)
+events.onmessage = (event) => {
+  try {
+    const body = JSON.parse(event.data) as typeof snapshot
+    if (body) {
+      setSnapshot(body)
+      lastOk = true
+      if (!readySent) {
+        readySent = true
+        void fetch(`${PREFIX}/ready`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-pet-token': token, 'x-dsh-session-desk': '1' },
+          body: '{}',
+        })
+      }
+    }
+  } catch {
+    /* keep last known */
+  }
+}
 
-function useSessions<T>(select: (s: { items: unknown[] }) => T): T {
-  const snap = useSyncExternalStore(subscribe, () => snapshot?.sessions ?? EMPTY_SESSIONS)
+function useSessions<T>(select: (s: { items: unknown[]; answerPet?: unknown }) => T): T {
+  const snap = useSyncExternalStore(subscribe, () => sessionsSnapshot)
   return select(snap)
 }
 function useScope<T>(select: (s: { value?: Partial<SessionDeskSettings> }) => T): T {

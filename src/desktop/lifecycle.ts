@@ -111,7 +111,10 @@ export function createDesktopPetController(deps?: Deps): DesktopPetController {
       stage = 'idle'
       errorMsg = undefined
       pending = null
-      current?.kill()
+      current?.kill('SIGTERM')
+      const leftover = current
+      const timer = setTimeout(() => leftover?.kill('SIGKILL'), 400)
+      if (typeof timer === 'object' && 'unref' in timer) timer.unref()
     },
     isActive(): boolean { return active },
     isReady(): boolean { return ready },

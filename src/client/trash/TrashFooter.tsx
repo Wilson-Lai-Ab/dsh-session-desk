@@ -44,6 +44,20 @@ export interface TrashFooterProps {
 
 const DEFAULT_RETENTION_DAYS = 30
 
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return ''
+  if (bytes < 1024) return `${bytes} B`
+  const units = ['KB', 'MB', 'GB']
+  let value = bytes / 1024
+  let unit = 0
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024
+    unit += 1
+  }
+  const digits = value >= 10 || unit === 0 ? 0 : 1
+  return `${value.toFixed(digits)} ${units[unit]!}`
+}
+
 /** Drop-spot anchor: center-lower of the viewport (image-2 area). */
 const TARGET_X = 0.46
 const TARGET_Y = 0.685
@@ -241,20 +255,40 @@ export function TrashFooter(props: TrashFooterProps): ReactNode {
             <div className="dsd-trash-pop__empty">{t('trash.empty')}</div>
           ) : (
             <>
-              {rows.map(row => (
-                <div key={row.trashId} className="dsd-trash-pop__row">
-                  <div className="dsd-trash-pop__meta">
-                    <div className="dsd-trash-pop__title">{row.title}</div>
-                    <div className="dsd-trash-pop__sub">
-                      {row.memberCount ? `${t('trash.members', { n: row.memberCount })} · ` : ''}
-                      {t('trash.daysLeft', { n: daysLeft(row.deletedAt) })}
+              {rows.map(row => {
+                const orphan = row.kind === 'orphan'
+                const size = formatBytes(row.bytes)
+                const title = orphan ? t('trash.orphanTitle', { name: row.title || row.trashId }) : row.title
+                return (
+                  <div key={row.trashId} className="dsd-trash-pop__row">
+                    <div className="dsd-trash-pop__meta">
+                      <div className="dsd-trash-pop__title">{title}</div>
+                      <div className="dsd-trash-pop__sub">
+                        {orphan ? `${t('trash.orphan')} · ` : ''}
+                        {row.memberCount ? `${t('trash.members', { n: row.memberCount })} · ` : ''}
+                        {size !== '' ? `${size} · ` : ''}
+                        {t('trash.daysLeft', { n: daysLeft(row.deletedAt) })}
+                      </div>
                     </div>
+                    {orphan
+                      ? <span className="dsd-trash-pop__muted">{t('trash.noRestore')}</span>
+                      : <button type="button" onClick={() => { void restore(row.trashId).then(() => refreshAll()) }}>{t('trash.restore')}</button>}
+                    <button type="button" onClick={() => { if (window.confirm(t('trash.confirmPurge'))) void purge({ trashId: row.trashId }).then(refresh) }}>{t('trash.purge')}</button>
                   </div>
-                  <button type="button" onClick={() => { void restore(row.trashId).then(() => refreshAll()) }}>{t('trash.restore')}</button>
-                  <button type="button" onClick={() => { if (window.confirm(t('trash.confirmPurge'))) void purge({ trashId: row.trashId }).then(refresh) }}>{t('trash.purge')}</button>
-                </div>
-              ))}
-              <button type="button" className="dsd-trash-pop__all" onClick={() => { if (window.confirm(t('trash.confirmPurgeAll'))) void purge({ all: true }).then(refresh) }}>{t('trash.purgeAll')}</button>
+                )
+              })}
+              <button
+                type="button"
+                className="dsd-trash-pop__all"
+                onClick={() => {
+                  if (!window.confirm(t('trash.confirmPurgeAll'))) return
+                  void purge({ all: true }).then((result) => {
+                    const freed = formatBytes(result.bytesFreed ?? 0)
+                    setNotice(freed === '' ? '' : t('trash.cleared', { n: freed }))
+                    return refresh()
+                  })
+                }}
+              >{t('trash.purgeAll')}</button>
             </>
           )}
           {notice !== '' && <div className="dsd-trash-pop__notice">{notice}</div>}

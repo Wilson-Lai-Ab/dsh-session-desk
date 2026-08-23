@@ -50,6 +50,7 @@ describe('answer-pet engine', () => {
     const snap = engine.snapshot(10_200)
     expect(snap.active).toBe(true)
     expect(snap.session?.title).toBe('调研插件核心实现')
+    expect(engine.titleOf(sessionId)).toBe('调研插件核心实现')
     expect(snap.view.phase).toBe('think')
   })
 
@@ -101,5 +102,37 @@ describe('answer-pet engine', () => {
     emit('main', { type: 'turn/start', data: { turn: 1 }, time: 10_000 })
     emit('main', { type: 'step/start', data: { step: 1 }, time: 10_100 })
     expect(edges).toContain('turn/start:turn')
+  })
+
+  it('does not read session.events on first sight or seed (progress is incremental)', () => {
+    let reads = 0
+    const log: Record<string, unknown>[] = []
+    for (let i = 0; i < 50; i += 1) {
+      log.push({ type: 'assistant/chunk', seq: i, data: { chunk: { type: 'text-delta', text: 'x'.repeat(80) } } })
+    }
+    const live = {
+      id: 'huge',
+      get events(): Record<string, unknown>[] {
+        reads += 1
+        return log
+      },
+    }
+    let handler: ((session: unknown, event: unknown) => void) | null = null
+    const engine = createAnswerPetEngine({
+      on: (h) => {
+        handler = h
+        return () => { handler = null }
+      },
+      sessions: { get: (id: string) => (id === 'huge' ? live : undefined) },
+      seed: ['huge'],
+      now: () => 10_000,
+    })
+    expect(reads).toBe(0)
+    handler?.(live, { type: 'turn/start', seq: 50, time: 10_000, data: { turn: 1 } })
+    expect(reads).toBe(0)
+    const snap = engine.snapshot(10_100)
+    expect(snap.session?.id).toBe('huge')
+    expect(snap.view.phase).toBe('turn')
+    expect(snap.view.outputTokens).toBe(0)
   })
 })

@@ -2,9 +2,20 @@ import { describe, expect, it } from 'vitest'
 import {
   activityOf,
   aggregatePetKind,
+  petKindFromLive,
+  calloutAnchorX,
+  calloutMaxHeight,
+  clampPetInBounds,
   clampPetPosition,
+  completedFromLive,
   completedRows,
   defaultPetPosition,
+  desktopPetRest,
+  nextIdleBroadcastDelay,
+  IDLE_BROADCAST_MIN_MS,
+  IDLE_BROADCAST_MAX_MS,
+  IDLE_BROADCAST_HOLD_MS,
+  visiblePetCards,
   foldPetList,
   foldPetRows,
   idlePhraseIndex,
@@ -92,13 +103,34 @@ describe('resolvePetImage', () => {
 })
 
 describe('clampPetPosition', () => {
-  it('clamps a square pet inside the viewport', () => {
-    expect(clampPetPosition(-20, -4, 48, 48, 200, 100)).toEqual({ x: 0, y: 0 })
-    expect(clampPetPosition(400, 400, 48, 48, 200, 100)).toEqual({ x: 152, y: 52 })
+  it('clamps a square pet inside the viewport, above the composer', () => {
+    expect(clampPetPosition(-20, -4, 48, 48, 200, 200)).toEqual({ x: 0, y: 0 })
+    expect(clampPetPosition(400, 400, 48, 48, 200, 200)).toEqual({ x: 152, y: 56 })
   })
 
   it('clamps a wide 16:9 pet with its own height', () => {
-    expect(clampPetPosition(1000, 1000, 462, 260, 800, 600)).toEqual({ x: 338, y: 340 })
+    expect(clampPetPosition(1000, 1000, 160, 90, 800, 600)).toEqual({ x: 640, y: 414 })
+  })
+
+  it('never lets a saved position cover the composer', () => {
+    expect(clampPetPosition(0, 520, 160, 90, 360, 640).y).toBe(640 - 90 - 96)
+  })
+
+  it('centers a desktop-shell pet without reserving the composer inset', () => {
+    expect(clampPetInBounds(1000, 1000, 160, 90, 420, 560)).toEqual({ x: 260, y: 470 })
+    expect(clampPetInBounds(-10, -10, 160, 90, 420, 560)).toEqual({ x: 0, y: 0 })
+    const cx = (420 - 160) / 2
+    const cy = (560 - 90) / 2
+    expect(clampPetInBounds(cx, cy, 160, 90, 420, 560)).toEqual({ x: cx, y: cy })
+  })
+})
+
+describe('petKindFromLive', () => {
+  it('keeps folded busy kinds, and treats live answer-pet cards as running when the list is idle', () => {
+    expect(petKindFromLive({ folded: ['idle'], liveRunning: 0 })).toBe('idle')
+    expect(petKindFromLive({ folded: ['idle'], liveRunning: 1 })).toBe('running')
+    expect(petKindFromLive({ folded: ['awaiting'], liveRunning: 2 })).toBe('awaiting')
+    expect(petKindFromLive({ folded: ['error'], liveRunning: 1 })).toBe('error')
   })
 })
 
@@ -214,12 +246,24 @@ describe('foldPetList', () => {
 })
 
 describe('defaultPetPosition', () => {
-  it('rests bottom-right above the composer (~96px bottom, 16px right)', () => {
+  it('rests bottom-right above the composer', () => {
     expect(defaultPetPosition(800, 600, 48, 48)).toEqual({ x: 800 - 48 - 16, y: 600 - 48 - 96 })
   })
 
-  it('accounts for a wide pet height', () => {
-    expect(defaultPetPosition(800, 600, 462, 260)).toEqual({ x: 800 - 462 - 16, y: 600 - 260 - 96 })
+  it('accounts for a compact 16:9 pet height', () => {
+    expect(defaultPetPosition(800, 600, 160, 90)).toEqual({ x: 800 - 160 - 16, y: 600 - 90 - 96 })
+  })
+})
+
+describe('calloutAnchorX', () => {
+  it('centers the bubble on the pet instead of clamping to 160px', () => {
+    expect(calloutAnchorX(40, 160, 800)).toBe(120)
+  })
+
+  it('keeps the bubble on-screen at the left and right edges', () => {
+    expect(calloutAnchorX(0, 48, 800)).toBeGreaterThanOrEqual(12)
+    expect(calloutAnchorX(0, 48, 800)).toBeLessThan(80)
+    expect(calloutAnchorX(752, 48, 800)).toBeLessThanOrEqual(788)
   })
 })
 
@@ -266,6 +310,60 @@ describe('idlePhraseIndex', () => {
 
   it('returns 0 for an empty phrase list', () => {
     expect(idlePhraseIndex(3, 0)).toBe(0)
+  })
+})
+
+describe('nextIdleBroadcastDelay', () => {
+  it('stays between 10s and 60s inclusive', () => {
+    expect(nextIdleBroadcastDelay(() => 0)).toBe(IDLE_BROADCAST_MIN_MS)
+    expect(nextIdleBroadcastDelay(() => 1)).toBe(IDLE_BROADCAST_MAX_MS)
+    expect(nextIdleBroadcastDelay(() => 0.5)).toBe(35_000)
+  })
+
+  it('holds the idle bubble for 8 seconds then hides it', () => {
+    expect(IDLE_BROADCAST_HOLD_MS).toBe(8_000)
+  })
+})
+
+describe('calloutMaxHeight', () => {
+  it('keeps the bubble above the sprite and inside the window', () => {
+    expect(calloutMaxHeight(392)).toBeLessThanOrEqual(372)
+    expect(calloutMaxHeight(100)).toBeGreaterThanOrEqual(72)
+    expect(calloutMaxHeight(100)).toBeLessThanOrEqual(80)
+  })
+})
+
+describe('desktopPetRest', () => {
+  it('leaves room above the bubble and below the sprite for the mode menu', () => {
+    const pos = desktopPetRest(420, 640, 200, 112)
+    expect(pos.y).toBeGreaterThanOrEqual(220)
+    expect(pos.y + 112).toBeLessThanOrEqual(640 - 96)
+    expect(pos.x).toBeGreaterThan(0)
+  })
+})
+
+describe('visiblePetCards', () => {
+  it('collapses to a summary until the user expands', () => {
+    const cards = [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }]
+    expect(visiblePetCards(cards, 0).shown).toEqual([])
+    expect(visiblePetCards(cards, 0).overflow).toBe(4)
+    expect(visiblePetCards(cards, 2).shown.map(c => c.id)).toEqual(['a', 'b'])
+    expect(visiblePetCards(cards, 2).overflow).toBe(2)
+  })
+})
+
+describe('collapsed progress overflow copy', () => {
+  it('does not render a +N overflow line under 执行进度', async () => {
+    const { readFileSync } = await import('node:fs')
+    const src = readFileSync(new URL('../src/client/pet/PetOverlay.tsx', import.meta.url), 'utf8')
+    expect(src).not.toMatch(/\+\{preview\.overflow\}/)
+  })
+})
+
+describe('completedFromLive', () => {
+  it('treats a live running card that disappeared as a finished session', () => {
+    expect(completedFromLive(['a', 'b'], ['b'], { a: '插件' }).map(e => e.id)).toEqual(['a'])
+    expect(completedFromLive(['a'], ['a'])).toEqual([])
   })
 })
 

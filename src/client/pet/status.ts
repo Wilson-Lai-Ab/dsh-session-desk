@@ -2,6 +2,7 @@
  * Pet status mapping, image URL whitelist, and viewport clamp.
  * Chat body text is never inspected: awaiting is openState only.
  */
+import { clampPetSize, PET_SIZE_MIN } from '../../shared.ts'
 import { sanitizeWallpaperUrl } from '../../sanitize.ts'
 
 export type PetKind = 'running' | 'idle' | 'error' | 'awaiting' | 'subagent'
@@ -72,6 +73,13 @@ export function aggregatePetKind(kinds: readonly PetKind[]): PetKind {
   return 'idle'
 }
 
+/** Folded list can miss live work; answer-pet running cards fill that gap. */
+export function petKindFromLive(input: { folded: readonly PetKind[]; liveRunning: number }): PetKind {
+  const folded = aggregatePetKind(input.folded)
+  if (folded !== 'idle') return folded
+  return input.liveRunning > 0 ? 'running' : 'idle'
+}
+
 const BUSY: ReadonlySet<PetKind> = new Set(['running', 'awaiting', 'error', 'subagent'])
 
 /** Catalog / lineage child — listed under a parent, not as its own pet row. */
@@ -134,6 +142,19 @@ export function idlePhraseIndex(tick: number, count: number): number {
   return ((tick % count) + count) % count
 }
 
+/** Random delay between idle broadcasts, inclusive of both ends. */
+export const IDLE_BROADCAST_MIN_MS = 10_000
+export const IDLE_BROADCAST_MAX_MS = 60_000
+
+export function nextIdleBroadcastDelay(random: () => number = Math.random): number {
+  const span = IDLE_BROADCAST_MAX_MS - IDLE_BROADCAST_MIN_MS
+  const unit = Math.min(1, Math.max(0, random()))
+  return Math.round(IDLE_BROADCAST_MIN_MS + unit * span)
+}
+
+/** How long an idle broadcast bubble stays visible. */
+export const IDLE_BROADCAST_HOLD_MS = 8_000
+
 /**
  * Rows that just finished: busy (running/subagent) in `prev`, idle in `next`.
  * A session still running, awaiting, or errored is not counted as completed.
@@ -194,6 +215,13 @@ function rootParentId(row: PetSessionRow, byId: Map<string, PetSessionRow>): str
     current = next
   }
   return undefined
+}
+
+/** Stable identity for folded pet rows: session-store churn with the same rows is a no-op. */
+export function foldedPetSignature(rows: readonly FoldedPetRow[]): string {
+  return rows
+    .map(row => `${row.id}\0${row.title}\0${row.kind}\0${row.activity ?? ''}\0${row.tool ?? ''}`)
+    .join('\n')
 }
 
 export function foldPetRows(rows: readonly PetSessionRow[]): FoldedPetRow[] {
@@ -326,8 +354,46 @@ export function resolvePetImage(raw: string | undefined): string | null {
   return sanitizeWallpaperUrl(raw)
 }
 
-/** Clamp a width×height pet so it stays fully inside the viewport. */
-export function clampPetPosition(
+/** Compact desktop window: sit the sprite low so the bubble above is not clipped. */
+export function desktopPetRest(
+  viewportWidth: number,
+  viewportHeight: number,
+  width: number,
+  height: number,
+): { x: number; y: number } {
+  const menu = 96
+  const bubble = 228
+  return clampPetInBounds(
+    (viewportWidth - width) / 2,
+    Math.max(bubble, viewportHeight - height - menu),
+    width,
+    height,
+    viewportWidth,
+    viewportHeight,
+  )
+}
+
+/** First `limit` progress cards stay in view; the rest are overflow. */
+export function visiblePetCards<T>(cards: readonly T[], limit = 2): { shown: T[]; overflow: number } {
+  const cap = Math.max(0, limit)
+  const shown = cards.slice(0, cap)
+  return { shown, overflow: Math.max(0, cards.length - shown.length) }
+}
+
+/** Live answer-pet cards that vanished between ticks are finished sessions. */
+export function completedFromLive(
+  prevIds: readonly string[],
+  nextIds: readonly string[],
+  titles: Record<string, string> = {},
+): FoldedPetRow[] {
+  const next = new Set(nextIds)
+  return prevIds
+    .filter(id => id !== '' && !next.has(id))
+    .map(id => ({ id, title: titles[id] ?? id, kind: 'idle' as const }))
+}
+
+/** Clamp a width×height pet so it stays fully inside a window, with no composer inset. */
+export function clampPetInBounds(
   x: number,
   y: number,
   width: number,
@@ -341,6 +407,36 @@ export function clampPetPosition(
     x: Math.min(maxX, Math.max(0, x)),
     y: Math.min(maxY, Math.max(0, y)),
   }
+}
+
+/** Clamp a width×height pet so it stays fully inside the viewport, above the composer. */
+export function clampPetPosition(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  viewportWidth: number,
+  viewportHeight: number,
+): { x: number; y: number } {
+  const maxX = Math.max(0, viewportWidth - width)
+  const maxY = Math.max(0, viewportHeight - height - PET_DEFAULT_BOTTOM)
+  return {
+    x: Math.min(maxX, Math.max(0, x)),
+    y: Math.min(maxY, Math.max(0, y)),
+  }
+}
+
+/** Max bubble height that still fits above the sprite in a compact window. */
+export function calloutMaxHeight(petY: number, margin = 8): number {
+  return Math.max(72, petY - margin - 12)
+}
+
+/** Horizontal center of the speech bubble, kept on-screen without a 160px floor. */
+export function calloutAnchorX(petX: number, petWidth: number, viewportWidth: number, margin = 12): number {
+  const center = petX + petWidth / 2
+  const min = margin
+  const max = Math.max(margin, viewportWidth - margin)
+  return Math.min(max, Math.max(min, center))
 }
 
 /** Pixel left/top for the default bottom-right rest pose. */
@@ -358,4 +454,28 @@ export function defaultPetPosition(
     viewportWidth,
     viewportHeight,
   )
+}
+
+/**
+ * Shrink a configured pet so it stays inside the viewport (VS Code sidebar,
+ * split panes) and never occupies more than half the width. Leaves room above
+ * the composer via PET_DEFAULT_BOTTOM.
+ */
+export function fitPetSize(
+  requested: number,
+  aspect: number,
+  viewportWidth: number,
+  viewportHeight: number,
+): number {
+  const width = clampPetSize(requested)
+  const ratio = aspect > 0 ? aspect : 1
+  const maxWidth = Math.max(
+    PET_SIZE_MIN,
+    Math.min(
+      viewportWidth - PET_DEFAULT_RIGHT * 2,
+      Math.floor(viewportWidth * 0.5),
+      Math.floor(Math.max(PET_SIZE_MIN, viewportHeight - PET_DEFAULT_BOTTOM - 24) * ratio),
+    ),
+  )
+  return clampPetSize(Math.min(width, maxWidth))
 }

@@ -25,13 +25,12 @@ import {
 import {
   applyTraceEvent,
   deriveTrace,
-  foldTrace,
   initialTraceState,
   startTraceTurn,
   type TraceState,
   type TraceViewItem,
 } from './trace.ts'
-import { foldSessionMeta, type SessionMeta } from './meta.ts'
+import { type SessionMeta } from './meta.ts'
 
 /** Events that should trigger an immediate "state changed" poke. */
 export const EDGE_TYPES: ReadonlySet<string> = new Set([
@@ -92,6 +91,8 @@ export interface AnswerPetEngine {
   snapshot(now?: number): AnswerPetSnapshot
   /** The currently-active session identity, if within the window. */
   current(): { id: string; title: string | null; running: boolean } | null
+  /** Last folded `session/title` for a live session, if any. */
+  titleOf(id: string): string | null
   /** Subscribe to state-change edges (returns an unsubscribe). */
   subscribeEdges(sink: EdgeSink): () => void
 }
@@ -114,20 +115,6 @@ export function createAnswerPetEngine(opts: AnswerPetEngineOptions): AnswerPetEn
     metas.set(id, meta)
     lastActiveId = id
     lastActiveAt = clock()
-  }
-
-  /** Durable event log for a session (store's log is the authoritative rehydrated source). */
-  const sessionEvents = (id: string): unknown[] | undefined => {
-    try {
-      const live = opts.sessions?.get?.(id)
-      if (live !== undefined && live !== null && typeof live === 'object') {
-        const events = (live as { events?: unknown }).events
-        if (Array.isArray(events)) return events
-      }
-    } catch {
-      /* tolerate */
-    }
-    return undefined
   }
 
   const current = (): { id: string; state: ProgressState; meta: SessionMeta; trace: TraceState } | null => {
@@ -158,19 +145,6 @@ export function createAnswerPetEngine(opts: AnswerPetEngineOptions): AnswerPetEn
     return () => sinks.delete(sink)
   }
 
-  // Hydrate durable titles for sessions we know about (even before events fire).
-  if (typeof opts.sessions?.get === 'function' && Array.isArray(opts.seed)) {
-    for (const id of opts.seed) {
-      if (metas.has(id)) continue
-      try {
-        const live = opts.sessions.get(id)
-        metas.set(id, foldSessionMeta((live as { events?: unknown } | null | undefined)?.events))
-      } catch {
-        /* tolerate */
-      }
-    }
-  }
-
   if (typeof opts.on === 'function') {
     const disposer = opts.on((session, event) => {
       if (session === null || typeof session !== 'object') return
@@ -183,48 +157,23 @@ export function createAnswerPetEngine(opts: AnswerPetEngineOptions): AnswerPetEn
       const eventType = typeof eventRec.type === 'string' ? eventRec.type : ''
       const eventTime = typeof eventRec.time === 'number' ? eventRec.time : clock()
 
-      // Fold or seed session metadata (title / running) on first sight.
+      // Incremental only: never read session.events. Mid-turn attach starts
+      // at idle until the next turn/start; live progress stays accurate after that.
       let meta = metas.get(id)
       if (meta === undefined) {
-        meta = foldSessionMeta(sessionEvents(id))
+        meta = { title: null, running: false }
         metas.set(id, meta)
       }
 
-      // Seed trace + progress once from the durable log leading up to this
-      // event (deduped by seq, so a mid-stream first-seen session isn't stuck
-      // at idle/0% and never double-applies its own events).
       let trace = traces.get(id)
       let state = sessions.get(id)
-      if (trace === undefined || state === undefined) {
-        const stored = sessionEvents(id) ?? []
-        const seedEvents = stored.length > 0
-          ? (stored as unknown[]).filter((item) => {
-              const seq = (item as { seq?: unknown } | null)?.seq
-              const evSeq = (event as { seq?: unknown }).seq
-              return typeof seq !== 'number' || typeof evSeq !== 'number' || seq < evSeq
-            })
-          : []
-        if (trace === undefined) {
-          trace = foldTrace(seedEvents, eventTime)
-          traces.set(id, trace)
-        }
-        if (state === undefined) {
-          // Replay turn boundaries + events to recover a real starting phase.
-          state = initialProgressState()
-          for (const item of seedEvents) {
-            if (item === null || typeof item !== 'object') continue
-            const rec = item as { type?: unknown; data?: unknown; time?: unknown }
-            if (rec.type === 'turn/start') {
-              state = startTurn((rec.data ?? {}) as { turn?: unknown }, typeof rec.time === 'number' ? rec.time : eventTime)
-            } else {
-              applyEvent(state, {
-                type: typeof rec.type === 'string' ? rec.type : undefined,
-                data: rec.data !== null && typeof rec.data === 'object' ? (rec.data as Record<string, unknown>) : undefined,
-              }, typeof rec.time === 'number' ? rec.time : eventTime)
-            }
-          }
-          touch(id, state, meta)
-        }
+      if (trace === undefined) {
+        trace = initialTraceState()
+        traces.set(id, trace)
+      }
+      if (state === undefined) {
+        state = initialProgressState()
+        touch(id, state, meta)
       }
 
       if (eventType === 'turn/start') {
@@ -293,12 +242,15 @@ export function createAnswerPetEngine(opts: AnswerPetEngineOptions): AnswerPetEn
     }
   }
 
+  const titleOf = (id: string): string | null => metas.get(id)?.title ?? null
+
   return {
     snapshot,
     current: () => {
       const cur = current()
       return cur !== null ? { id: cur.id, title: cur.meta.title, running: cur.meta.running } : null
     },
+    titleOf,
     subscribeEdges,
   }
 }

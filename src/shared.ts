@@ -19,7 +19,7 @@ export type PetThemeId = (typeof PET_THEME_IDS)[number]
 /** Allowed pet size range (CSS px). `petSize` is the pet WIDTH; height follows the theme aspect ratio. */
 export const PET_SIZE_MIN = 96
 export const PET_SIZE_MAX = 800
-export const PET_SIZE_DEFAULT = 462
+export const PET_SIZE_DEFAULT = 160
 
 /** Clamp a configured pet size to [MIN, MAX]. */
 export function clampPetSize(value: number): number {

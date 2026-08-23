@@ -56,6 +56,13 @@ describe('trash store', () => {
     await stat(join(root, '.trash', result.trashId, live.slice(root.length + 1)))
   })
 
+  it('listLive reports jsonlBytes from session.jsonl.zstd', async () => {
+    const { sessionId, store } = await setup()
+    const rows = await store.listLive()
+    const row = rows.find(item => item.sessionId === sessionId)
+    expect(row?.jsonlBytes).toBe(1)
+  })
+
   it('listTrash returns the row and listLive no longer includes it', async () => {
     const { cwd, sessionId, store } = await setup()
     const before = await store.listLive()
@@ -70,6 +77,7 @@ describe('trash store', () => {
     expect(trash[0]!.trashId).toBe(result.trashId)
     expect(trash[0]!.sessionId).toBe(sessionId)
     expect(trash[0]!.title).toBe('hello')
+    expect(trash[0]!.kind).toBe('entry')
   })
 
   it('restore() moves back to originalPath', async () => {
@@ -175,6 +183,18 @@ describe('trash store', () => {
     await rm(outsideRoot, { recursive: true, force: true })
   })
 
+  it('skips missing descendants and still trashes the parent', async () => {
+    const { cwd, sessionId, store } = await setup()
+    const missingId = 'session-cccccccc-cccc-cccc-cccc-cccccccccccc'
+    const result = await store.trash({ sessionId, cwd, title: 'root', sessionIds: [sessionId, missingId] })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.sessionIds).toEqual([sessionId])
+    const rows = await store.listTrash()
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.sessionId).toBe(sessionId)
+  })
+
   it('trashes parent + subagents into one entry with members', async () => {
     const { cwd, sessionId, store } = await setup()
     const childId = 'session-cccccccc-cccc-cccc-cccc-cccccccccccc'
@@ -239,5 +259,76 @@ describe('trash store', () => {
       renameState.failAfter = 0
       renameState.calls = 0
     }
+  })
+
+  async function plantOrphan(name: string, payload: string, mtimeMs?: number): Promise<string> {
+    const dir = join(root, '.trash', name)
+    await mkdir(dir, { recursive: true })
+    const file = join(dir, 'session.jsonl.zstd')
+    await writeFile(file, payload)
+    if (mtimeMs !== undefined) {
+      const at = new Date(mtimeMs)
+      const { utimes } = await import('node:fs/promises')
+      await utimes(dir, at, at)
+    }
+    return dir
+  }
+
+  it('listTrash includes flatten orphan dirs without a manifest', async () => {
+    const { store } = await setup()
+    await plantOrphan('manual-20260823', 'huge-session')
+    const rows = await store.listTrash()
+    const orphan = rows.find(row => row.trashId === 'manual-20260823')
+    expect(orphan).toBeDefined()
+    expect(orphan!.kind).toBe('orphan')
+    expect(orphan!.title).toContain('manual-20260823')
+    expect(orphan!.bytes).toBeGreaterThan(0)
+    expect(orphan!.sessionId).toBe('')
+    expect(orphan!.originalPath).toBe('')
+  })
+
+  it('restore() refuses orphan rows', async () => {
+    const { store } = await setup()
+    await plantOrphan('manual-20260823', 'huge-session')
+    const restored = await store.restore('manual-20260823')
+    expect(restored.ok).toBe(false)
+    if (restored.ok) return
+    expect(restored.code).toBe('not-found')
+    await stat(join(root, '.trash', 'manual-20260823', 'session.jsonl.zstd'))
+  })
+
+  it('purge() permanently deletes an orphan directory', async () => {
+    const { store } = await setup()
+    await plantOrphan('manual-20260823', 'huge-session')
+    const result = await store.purge('manual-20260823')
+    expect(result.ok).toBe(true)
+    await expect(stat(join(root, '.trash', 'manual-20260823'))).rejects.toThrow()
+    expect(await store.listTrash()).toHaveLength(0)
+  })
+
+  it('purgeAll() removes manifest entries and orphans and reports bytesFreed', async () => {
+    const { cwd, sessionId, store } = await setup()
+    const trashed = await store.trash({ sessionId, cwd, title: 'hello' })
+    expect(trashed.ok).toBe(true)
+    await plantOrphan('manual-20260823', 'huge-session')
+    const result = await store.purgeAll()
+    expect(result.ok).toBe(true)
+    expect(result.removed).toBe(2)
+    expect(result.orphanRemoved).toBe(1)
+    expect(result.bytesFreed).toBeGreaterThan(0)
+    expect(await store.listTrash()).toHaveLength(0)
+    await expect(stat(join(root, '.trash', 'manual-20260823'))).rejects.toThrow()
+  })
+
+  it('sweepExpired removes stale orphans by directory mtime', async () => {
+    const { store } = await setup()
+    const old = 1_720_000_000_000 - 40 * 86_400_000
+    await plantOrphan('manual-old', 'old', old)
+    await plantOrphan('manual-fresh', 'fresh', 1_720_000_000_000)
+    const swept = await store.sweepExpired()
+    expect(swept.removed).toBe(1)
+    const remaining = await store.listTrash()
+    expect(remaining).toHaveLength(1)
+    expect(remaining[0]!.trashId).toBe('manual-fresh')
   })
 })

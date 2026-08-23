@@ -7,23 +7,33 @@ import { createPortal } from 'react-dom'
 import { DEFAULT_SETTINGS, clampPetSize, type SessionDeskSettings } from '../../shared.ts'
 import { adoptPetStyles } from './pet-styles.ts'
 import {
-  aggregatePetKind,
+  calloutAnchorX,
+  calloutMaxHeight,
   clampPetPosition,
+  completedFromLive,
   completedRows,
   defaultPetPosition,
+  desktopPetRest,
+  fitPetSize,
   foldPetList,
+  foldedPetSignature,
   idlePhraseIndex,
+  IDLE_BROADCAST_HOLD_MS,
+  nextIdleBroadcastDelay,
+  petKindFromLive,
   resolvePetImage,
   subagentDetailRows,
   type FoldedPetRow,
   type PetKind,
 } from './status.ts'
+import { classifyPointerEnd, desktopDragOffset, desktopPointerOverChrome, desktopShouldIgnoreMouse, ignoreMouseChanged, petVideoShouldLoop, petVideoShouldPlay, pointerHasMoved } from './pointer.ts'
 import { WhaleMark } from './WhaleMark.tsx'
 import { ApPet } from './ApPet.tsx'
 import { AP_THEME_IDS, apPhaseOf } from './ap-themes.ts'
 import { dshpetTheme } from './dshpet-assets.ts'
 import { pickReaction, resolveSprite, selectTheme, type Sprite } from './themes.ts'
-import { answerPetState, type AnswerPetSnapshot } from '../api.ts'
+import { answerPetState, listSessions, type AnswerPetSnapshot } from '../api.ts'
+import { formatJsonlBytes, jsonlTooLarge } from '../../session-size.ts'
 
 interface SessionRow {
   id?: string
@@ -47,6 +57,7 @@ interface SessionsSnapshot {
   items?: SessionRow[]
   jobsBySession?: Record<string, readonly { kind?: string; status?: string }[] | undefined>
   subagentsByParent?: Record<string, { entries?: readonly { kind?: string; activity?: string }[] } | undefined>
+  answerPet?: AnswerPetSnapshot
 }
 
 interface SettingsSnapshot {
@@ -69,8 +80,20 @@ export interface PetOverlayProps {
   shell?: boolean
 }
 
-const DRAG_THRESHOLD = 4
 const MODE_HOLD_MS = 480
+
+function useStableFoldedRows(rows: readonly FoldedPetRow[]): readonly FoldedPetRow[] {
+  const ref = useRef(rows)
+  if (foldedPetSignature(ref.current) !== foldedPetSignature(rows)) ref.current = rows
+  return ref.current
+}
+
+function readViewport(): { w: number; h: number } {
+  return {
+    w: typeof window === 'undefined' ? 1280 : window.innerWidth,
+    h: typeof window === 'undefined' ? 720 : window.innerHeight,
+  }
+}
 
 /** Desktop-shell HTTP prefix (browser bundle must not pull node: modules from src/desktop). */
 const PET_DESKTOP_PREFIX = '/session-desk/pet-desktop'
@@ -184,8 +207,8 @@ interface PetVideoLayer {
   onEnded?: () => void
 }
 
-function PetVideo(props: { src: string; loop: boolean; onEnded?: () => void }): ReactNode {
-  const { src, loop, onEnded } = props
+function PetVideo(props: { src: string; loop: boolean; play: boolean; onEnded?: () => void }): ReactNode {
+  const { src, loop, play, onEnded } = props
   const [layers, setLayers] = useState<[PetVideoLayer | null, PetVideoLayer | null]>([
     { src, loop, onEnded },
     null,
@@ -207,9 +230,31 @@ function PetVideo(props: { src: string; loop: boolean; onEnded?: () => void }): 
     })
   }, [src, loop, onEnded])
 
+  useEffect(() => {
+    const video = refs[visibleRef.current].current
+    if (video === null) return
+    if (!play || document.hidden) {
+      video.pause()
+      return
+    }
+    void video.play().catch(() => {})
+  }, [play, src])
+
+  useEffect(() => {
+    const sync = (): void => {
+      const video = refs[visibleRef.current].current
+      if (video === null) return
+      if (!play || document.hidden) video.pause()
+      else void video.play().catch(() => {})
+    }
+    document.addEventListener('visibilitychange', sync)
+    return () => document.removeEventListener('visibilitychange', sync)
+  }, [play])
+
   const handleReady = (idx: number): void => {
     if (idx === visibleRef.current) return
-    void refs[idx].current?.play().catch(() => {})
+    if (play) void refs[idx].current?.play().catch(() => {})
+    else refs[idx].current?.pause()
     setVisible(idx)
     setLayers(prev => {
       const next: [PetVideoLayer | null, PetVideoLayer | null] = [prev[0], prev[1]]
@@ -222,17 +267,24 @@ function PetVideo(props: { src: string; loop: boolean; onEnded?: () => void }): 
     <>
       {[0, 1].map(i => {
         const layer = layers[i]
+        if (layer === null) return null
         return (
           <video
             key={i}
             ref={refs[i]}
-            src={layer?.src ?? undefined}
-            autoPlay
-            loop={layer?.loop ?? true}
+            src={layer.src}
+            autoPlay={play}
+            loop={layer.loop}
             muted
             playsInline
-            onLoadedData={layer !== null ? () => handleReady(i) : undefined}
-            onEnded={i === visible && layer !== null && !layer.loop ? layer.onEnded : undefined}
+            preload="metadata"
+            disablePictureInPicture
+            crossOrigin="anonymous"
+            onLoadedData={() => handleReady(i)}
+            onEnded={i === visible && !layer.loop ? () => {
+              refs[i].current?.pause()
+              layer.onEnded?.()
+            } : undefined}
             className={i === visible ? 'dsd-pet__layer dsd-pet__layer--on' : 'dsd-pet__layer'}
           />
         )
@@ -248,9 +300,14 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null)
   const dragging = useRef(false)
   const moved = useRef(false)
-  const origin = useRef({ pointerX: 0, pointerY: 0, x: 0, y: 0, screenX: 0, screenY: 0 })
+  const origin = useRef({ pointerX: 0, pointerY: 0, x: 0, y: 0, screenX: 0, screenY: 0, pointerScreenX: 0, pointerScreenY: 0 })
   const livePos = useRef({ x: 0, y: 0 })
   const layerRef = useRef<HTMLDivElement | null>(null)
+  const petRef = useRef<HTMLButtonElement | null>(null)
+  const calloutRef = useRef<HTMLDivElement | null>(null)
+  const dragRaf = useRef(0)
+  const ignoreMouseRef = useRef<boolean | null>(null)
+  const nativeDrag = useRef(false)
 
   const scoped = props.useScope ? props.useScope(snapshot => snapshot.value) : undefined
   const settings: SessionDeskSettings = { ...DEFAULT_SETTINGS, ...(scoped ?? {}) }
@@ -267,6 +324,7 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
   const prevDesktopRef = useRef<boolean | null>(null)
   const modeHoldRef = useRef<number | undefined>(undefined)
   const modeHoldFired = useRef(false)
+  const jsonlById = useRef<Map<string, number>>(new Map())
 
   // While desktop mode is armed, poll the host /status every 1s. If an active
   // desktop window exists, hide the browser pet; also consume any pendingOpen
@@ -299,18 +357,31 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
         setDesktopDownloading(data.download?.stage === 'downloading')
         setDesktopError(data.download?.stage === 'failed' ? (data.download.error ?? 'download failed') : null)
         const pending = data.pendingOpen
+        const pendingId = pending?.id
+        const pendingAt = pending?.at
         if (
-          pending &&
-          typeof pending.id === 'string' &&
-          typeof pending.at === 'number' &&
-          pending.at !== lastAckRef.current
+          typeof pendingId === 'string' &&
+          typeof pendingAt === 'number' &&
+          pendingAt !== lastAckRef.current
         ) {
-          lastAckRef.current = pending.at
-          void props.sessions?.open?.(pending.id)
+          lastAckRef.current = pendingAt
+          void (async () => {
+            try {
+              if (!jsonlById.current.has(pendingId)) {
+                const rows = await listSessions()
+                jsonlById.current = new Map(rows.map(row => [row.sessionId, row.jsonlBytes ?? 0]))
+              }
+              const size = jsonlById.current.get(pendingId)
+              if (jsonlTooLarge(size)) return
+              void props.sessions?.open?.(pendingId)
+            } catch {
+              /* desktop open is best-effort */
+            }
+          })()
           void fetch(`${PET_DESKTOP_PREFIX}/ack-open`, {
             method: 'POST',
             headers: CSRF_HEADERS,
-            body: JSON.stringify({ at: pending.at }),
+            body: JSON.stringify({ at: pendingAt }),
           })
         }
       } catch {
@@ -318,7 +389,7 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
       }
     }
     void poll()
-    const timer = window.setInterval(() => void poll(), 1000)
+    const timer = window.setInterval(() => void poll(), 5000)
     return () => {
       stopped = true
       window.clearInterval(timer)
@@ -363,7 +434,17 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
     if (props.useSessions) return
     try {
       const list = props.sessions?.list
-      const pull = (): void => setFallbackList(readListStore(list))
+      const pull = (): void => {
+        const next = readListStore(list)
+        setFallbackList(prev => {
+          try {
+            if (foldedPetSignature(foldPetList(prev)) === foldedPetSignature(foldPetList(next))) return prev
+          } catch {
+            /* fall through and accept next */
+          }
+          return next
+        })
+      }
       pull()
       return subscribeListStore(list, pull)
     } catch {
@@ -373,13 +454,13 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
   }, [props.sessions, props.useSessions])
 
   const snapshot = hookedList ?? fallbackList
-  const entries = useMemo(() => {
+  const entries = useStableFoldedRows(useMemo(() => {
     try {
       return foldPetList(snapshot)
     } catch {
       return []
     }
-  }, [snapshot])
+  }, [snapshot]))
 
   const watchIds = useMemo(() => {
     const ids = new Set<string>()
@@ -413,18 +494,59 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
     }
   }, [watchIds, props.sessions])
 
-  const kind = aggregatePetKind(entries.map(row => row.kind))
+  const [apSnapshot, setApSnapshot] = useState<AnswerPetSnapshot | null>(null)
+  const [cardsOpen, setCardsOpen] = useState(false)
+  useEffect(() => {
+    if (inShell) return undefined
+    let active = true
+    const poll = async (): Promise<void> => {
+      if (!active) return
+      try {
+        setApSnapshot(await answerPetState())
+      } catch {
+        /* host route absent → keep last */
+      }
+    }
+    void poll()
+    const events = new EventSource('/session-desk/api/answer-pet/events')
+    events.onmessage = (event) => {
+      if (!active) return
+      try {
+        const body = JSON.parse(event.data) as { ok?: boolean; data?: AnswerPetSnapshot }
+        if (body.data) setApSnapshot(body.data)
+      } catch {
+        /* keep last */
+      }
+    }
+    return () => {
+      active = false
+      events.close()
+    }
+  }, [inShell])
+  const liveFromSnap = (snapshot as SessionsSnapshot | undefined)?.answerPet
+  const apCards = (inShell ? liveFromSnap : apSnapshot)?.running ?? []
+  const kind = petKindFromLive({
+    folded: entries.map(row => row.kind),
+    liveRunning: apCards.length,
+  })
+
   const [celebrating, setCelebrating] = useState(false)
   const [completedList, setCompletedList] = useState<readonly FoldedPetRow[]>([])
   const prevEntriesRef = useRef<readonly FoldedPetRow[]>([])
+  const prevLiveIdsRef = useRef<readonly string[]>([])
   const timerRef = useRef<number | undefined>(undefined)
+  const liveCardIds = apCards.map(card => card.id)
+  const liveTitles = Object.fromEntries(apCards.map(card => [card.id, card.title || card.id]))
 
   // Celebrate each session as it finishes (busy → idle). New completions append to
   // the broadcast and extend the timer; the banner clears after 8s of quiet.
   useEffect(() => {
     const prevEntries = prevEntriesRef.current
-    const justCompleted = completedRows(prevEntries, entries)
+    const fromList = completedRows(prevEntries, entries)
+    const fromLive = completedFromLive(prevLiveIdsRef.current, liveCardIds, liveTitles)
     prevEntriesRef.current = entries
+    prevLiveIdsRef.current = liveCardIds
+    const justCompleted = [...fromList, ...fromLive.filter(row => !fromList.some(item => item.id === row.id))]
 
     if (justCompleted.length === 0) return
 
@@ -441,7 +563,7 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
       setCompletedList([])
       timerRef.current = undefined
     }, 8000)
-  }, [entries])
+  }, [entries, liveCardIds.join('\0')])
 
   // Clear the celebration timer on unmount.
   useEffect(() => {
@@ -449,31 +571,43 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
       if (timerRef.current !== undefined) window.clearTimeout(timerRef.current)
     }
   }, [])
-  const size = clampPetSize(settings.petSize)
+  const [viewSize, setViewSize] = useState(readViewport)
   const theme = useMemo(
     () => selectTheme(settings.petTheme, resolvePetImage(settings.petImage), dshpetTheme, AP_THEME_IDS),
     [settings.petTheme, settings.petImage],
   )
+  const size = fitPetSize(clampPetSize(settings.petSize), theme.aspect, viewSize.w, viewSize.h)
   const petHeight = Math.round(size / theme.aspect)
   const [idleTick, setIdleTick] = useState(0)
+  const [idleBroadcast, setIdleBroadcast] = useState(false)
   useEffect(() => {
-    if (kind !== 'idle') return
-    let timer = 0
+    if (kind !== 'idle') {
+      setIdleBroadcast(false)
+      return
+    }
+    let wait = 0
+    let hold = 0
     const schedule = (): void => {
-      // Rotate idle copy on a random 5–60s cadence instead of a fixed interval.
-      timer = window.setTimeout(() => {
+      wait = window.setTimeout(() => {
         setIdleTick(t => t + 1)
-        schedule()
-      }, 5000 + Math.random() * 55000)
+        setIdleBroadcast(true)
+        hold = window.setTimeout(() => {
+          setIdleBroadcast(false)
+          schedule()
+        }, IDLE_BROADCAST_HOLD_MS)
+      }, nextIdleBroadcastDelay())
     }
     schedule()
-    return () => window.clearTimeout(timer)
+    return () => {
+      window.clearTimeout(wait)
+      window.clearTimeout(hold)
+    }
   }, [kind])
   const sprite = useMemo(() => resolveSprite(theme, kind), [theme, kind, idleTick])
   // Main sessions that are working (streaming) or orchestrating subagents.
   const runningRows = entries.filter(e => e.kind === 'running' || e.kind === 'subagent')
   const awaitingRows = entries.filter(e => e.kind === 'awaiting')
-  const subagentDetail = useMemo(() => subagentDetailRows(snapshot), [snapshot])
+  const subagentDetail = useStableFoldedRows(useMemo(() => subagentDetailRows(snapshot), [snapshot]))
   // Subagent list is collapsed to a summary row by default; click to expand.
   const [subagentOpen, setSubagentOpen] = useState(false)
   useEffect(() => {
@@ -486,6 +620,10 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
   const clearReaction = useCallback(() => setReaction(null), [])
   const displaySprite = reaction ?? sprite
   const isReaction = reaction !== null
+  useEffect(() => {
+    if (!inShell) return
+    ;(window as unknown as { petDesktop?: { setPaintActive?(active: boolean): void } }).petDesktop?.setPaintActive?.(true)
+  }, [inShell])
 
   // Single-blink on click for answer-pet themes (non-drag): clear after ~340ms.
   const [apBlink, setApBlink] = useState(false)
@@ -506,45 +644,21 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
     return () => {
       if (apBlinkTimerRef.current !== undefined) window.clearTimeout(apBlinkTimerRef.current)
       if (modeHoldRef.current !== undefined) window.clearTimeout(modeHoldRef.current)
+      if (dragRaf.current !== 0) window.cancelAnimationFrame(dragRaf.current)
     }
   }, [])
-  const isAp = displaySprite.type === 'ap'
-  const apThemeId = isAp ? displaySprite.themeId : null
+  const isAp = AP_THEME_IDS.includes(theme.id)
+  const apThemeId = displaySprite.type === 'ap' ? displaySprite.themeId : null
 
-  // Answer-pet live snapshot (real title + non-zero progress from session events).
-  const [apSnapshot, setApSnapshot] = useState<AnswerPetSnapshot | null>(null)
-  // #3: progress cards are collapsed by default; user expands when needed.
-  const [cardsOpen, setCardsOpen] = useState(false)
-  useEffect(() => {
-    let active = true
-    const poll = async (): Promise<void> => {
-      if (!active) return
-      try {
-        setApSnapshot(await answerPetState())
-      } catch {
-        /* host route absent → keep last */
-      }
-    }
-    void poll()
-    const timer = window.setInterval(() => void poll(), 2000)
-    return () => {
-      active = false
-      window.clearInterval(timer)
-    }
-  }, [])
-  // #4: only running(ish) sessions produce cards — idle sessions no longer spam the bubble.
-  const apCards = apSnapshot?.running ?? []
-
-  const viewport = (): { w: number; h: number } => ({
-    w: typeof window === 'undefined' ? 1280 : window.innerWidth,
-    h: typeof window === 'undefined' ? 720 : window.innerHeight,
-  })
+  const viewport = (): { w: number; h: number } => viewSize
 
   const rest = (): { x: number; y: number } => {
     const { w, h } = viewport()
-    // Compact desktop window: ignore GUI petX/petY (those are screen-sized) so
-    // the sprite stays inside this window and remains hittable.
-    if (inShell) return clampPetPosition(8, h - petHeight - 8, size, petHeight, w, h)
+    // Compact desktop window: ignore GUI petX/petY (those are screen-sized) and
+    // center the sprite so the bubble above + mode menu below stay in-bounds.
+    if (inShell) {
+      return desktopPetRest(w, h, size, petHeight)
+    }
     if (settings.petX === -1 || settings.petY === -1) return defaultPetPosition(w, h, size, petHeight)
     return clampPetPosition(settings.petX, settings.petY, size, petHeight, w, h)
   }
@@ -552,10 +666,12 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
   const pos = dragPos ?? rest()
   livePos.current = pos
 
-  // #5: keep the bubble on-screen and always ABOVE the pet (never flip it below).
-  const calloutCenterX = Math.min(Math.max(160, pos.x + size / 2), Math.max(160, viewport().w - 160))
+  // Keep the bubble on-screen and always ABOVE the pet (never flip it below).
+  const calloutCenterX = calloutAnchorX(pos.x, size, viewport().w)
   const calloutAbove = true
   const calloutTop = calloutAbove ? pos.y - 12 : pos.y + petHeight + 12
+  const calloutBottom = viewport().h - pos.y + 12
+  const calloutHeight = calloutMaxHeight(pos.y)
 
   useEffect(() => {
     if (settings.petX === -1 || settings.petY === -1) setDragPos(null)
@@ -563,6 +679,7 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
 
   useEffect(() => {
     const onResize = (): void => {
+      setViewSize(readViewport())
       if (dragging.current) return
       setDragPos(null)
     }
@@ -576,6 +693,52 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
     void props.update?.({ petX: next.x, petY: next.y })
   }, [props.update, size, petHeight])
 
+  const setIgnoreMouse = (ignore: boolean): void => {
+    if (!inShell) return
+    if (!ignoreMouseChanged(ignoreMouseRef.current, ignore)) return
+    ignoreMouseRef.current = ignore
+    ;(window as unknown as { petDesktop?: { setIgnoreMouse(ignore: boolean): void } }).petDesktop?.setIgnoreMouse(ignore)
+  }
+
+  const bubbleOpen = modeMenu || celebrating || kind !== 'idle' || apCards.length > 0 || idleBroadcast
+  const syncDesktopIgnore = (overHit = false, menuOpen = modeMenu): void => {
+    setIgnoreMouse(desktopShouldIgnoreMouse({
+      dragging: dragging.current,
+      menuOpen,
+      overHit,
+    }))
+  }
+
+  useEffect(() => {
+    syncDesktopIgnore()
+  }, [inShell, modeMenu])
+
+  useEffect(() => {
+    if (!modeMenu) return undefined
+    const onDismiss = (event: PointerEvent): void => {
+      const node = event.target
+      if (!(node instanceof Element)) {
+        setModeMenu(false)
+        return
+      }
+      if (node.closest('.dsd-pet__mode-menu') || node.closest('.dsd-pet__hit')) return
+      setModeMenu(false)
+    }
+    window.addEventListener('pointerdown', onDismiss, true)
+    return () => window.removeEventListener('pointerdown', onDismiss, true)
+  }, [modeMenu])
+
+  useEffect(() => {
+    if (!inShell) return undefined
+    const onMove = (event: PointerEvent): void => {
+      if (dragging.current) return
+      const node = document.elementFromPoint(event.clientX, event.clientY)
+      syncDesktopIgnore(desktopPointerOverChrome(node))
+    }
+    window.addEventListener('pointermove', onMove)
+    return () => window.removeEventListener('pointermove', onMove)
+  }, [inShell, modeMenu, bubbleOpen])
+
   const clearModeHold = (): void => {
     if (modeHoldRef.current !== undefined) {
       window.clearTimeout(modeHoldRef.current)
@@ -583,7 +746,28 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
     }
   }
 
-  const onPointerDown = (event: { pointerId: number; clientX: number; clientY: number; preventDefault(): void; currentTarget: HTMLElement }): void => {
+  const paintLivePos = (next: { x: number; y: number }): void => {
+    livePos.current = next
+    const pet = petRef.current
+    if (pet !== null) {
+      pet.style.left = `${next.x}px`
+      pet.style.top = `${next.y}px`
+    }
+    const callout = calloutRef.current
+    if (callout !== null) {
+      const { w, h } = viewport()
+      callout.style.left = `${calloutAnchorX(next.x, size, w)}px`
+      if (inShell) {
+        callout.style.top = 'auto'
+        callout.style.bottom = `${h - next.y + 12}px`
+        callout.style.maxHeight = `${calloutMaxHeight(next.y)}px`
+      } else {
+        callout.style.top = `${next.y - 12}px`
+      }
+    }
+  }
+
+  const onPointerDown = (event: React.PointerEvent<HTMLElement>): void => {
     event.preventDefault()
     dragging.current = true
     moved.current = false
@@ -596,60 +780,120 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
       y: start.y,
       screenX: window.screenX,
       screenY: window.screenY,
+      pointerScreenX: event.screenX,
+      pointerScreenY: event.screenY,
     }
     event.currentTarget.setPointerCapture?.(event.pointerId)
+    setIgnoreMouse(false)
+    const onWinMove = (move: PointerEvent): void => {
+      onPointerMove(move)
+    }
+    const onWinUp = (): void => {
+      window.removeEventListener('pointermove', onWinMove)
+      window.removeEventListener('pointerup', onWinUp)
+      window.removeEventListener('pointercancel', onWinUp)
+      onPointerUp()
+    }
+    window.addEventListener('pointermove', onWinMove)
+    window.addEventListener('pointerup', onWinUp)
+    window.addEventListener('pointercancel', onWinUp)
     clearModeHold()
     modeHoldRef.current = window.setTimeout(() => {
       modeHoldFired.current = true
       setModeMenu(true)
-      ;(window as unknown as { petDesktop?: { setIgnoreMouse(ignore: boolean): void } }).petDesktop?.setIgnoreMouse(false)
+      setIgnoreMouse(false)
     }, MODE_HOLD_MS)
   }
 
-  const onPointerMove = (event: { clientX: number; clientY: number }): void => {
+  const onPointerMove = (event: { clientX: number; clientY: number; screenX?: number; screenY?: number }): void => {
     if (!dragging.current) return
-    const dx = event.clientX - origin.current.pointerX
-    const dy = event.clientY - origin.current.pointerY
-    if (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD) {
+    const dx = inShell
+      ? (event.screenX ?? event.clientX) - origin.current.pointerScreenX
+      : event.clientX - origin.current.pointerX
+    const dy = inShell
+      ? (event.screenY ?? event.clientY) - origin.current.pointerScreenY
+      : event.clientY - origin.current.pointerY
+    if (pointerHasMoved(dx, dy)) {
       moved.current = true
       clearModeHold()
     }
+    if (!moved.current) return
     if (inShell) {
-      const api = (window as unknown as { petDesktop?: { moveWindow(x: number, y: number): void } }).petDesktop
-      api?.moveWindow(origin.current.screenX + dx, origin.current.screenY + dy)
+      if (!nativeDrag.current) {
+        nativeDrag.current = true
+        const offset = desktopDragOffset(
+          origin.current.screenX,
+          origin.current.screenY,
+          origin.current.pointerScreenX,
+          origin.current.pointerScreenY,
+        )
+        ;(window as unknown as { petDesktop?: { startDrag(x: number, y: number): void } }).petDesktop?.startDrag(offset.x, offset.y)
+      }
       return
     }
     const { w, h } = viewport()
     const next = clampPetPosition(origin.current.x + dx, origin.current.y + dy, size, petHeight, w, h)
-    livePos.current = next
-    setDragPos(next)
+    if (dragRaf.current !== 0) return
+    dragRaf.current = window.requestAnimationFrame(() => {
+      dragRaf.current = 0
+      paintLivePos(next)
+    })
   }
 
   const onPointerUp = (): void => {
     if (!dragging.current) return
     dragging.current = false
+    if (nativeDrag.current) {
+      nativeDrag.current = false
+      ;(window as unknown as { petDesktop?: { stopDrag(): void } }).petDesktop?.stopDrag()
+    }
     clearModeHold()
+    if (dragRaf.current !== 0) {
+      window.cancelAnimationFrame(dragRaf.current)
+      dragRaf.current = 0
+    }
     const next = livePos.current
-    if (moved.current) {
+    const kind = classifyPointerEnd({ moved: moved.current, holdMenuFired: modeHoldFired.current })
+    if (kind === 'drag') {
       if (!inShell) persistPosition(next.x, next.y)
+      setDragPos(next)
+      return
     }
-    else if (!modeHoldFired.current) {
-      if (modeMenu) setModeMenu(false)
-      else {
-        if (displaySprite.type === 'ap') triggerApBlink()
-        const picked = pickReaction(theme)
-        if (picked !== null && picked.type === 'video') setReaction(picked)
+    if (kind === 'click') {
+      if (modeMenu) {
+        setModeMenu(false)
+        setDragPos(null)
+        syncDesktopIgnore(false, false)
+        return
       }
+      if (displaySprite.type === 'ap') triggerApBlink()
+      const picked = pickReaction(theme)
+      if (picked !== null && picked.type === 'video') setReaction(picked)
+      setDragPos(null)
+      syncDesktopIgnore(false, false)
+      return
     }
-    setDragPos(moved.current ? next : null)
+    setDragPos(null)
+    syncDesktopIgnore(kind === 'hold-menu', kind === 'hold-menu' || modeMenu)
   }
 
   const openSession = (id: string): void => {
-    try {
-      void props.sessions?.open?.(id)
-    } catch {
-      setHidden(true)
-    }
+    void (async () => {
+      try {
+        if (!jsonlById.current.has(id)) {
+          const rows = await listSessions()
+          jsonlById.current = new Map(rows.map(row => [row.sessionId, row.jsonlBytes ?? 0]))
+        }
+        const size = jsonlById.current.get(id)
+        if (jsonlTooLarge(size)) {
+          window.alert(props.t?.('sessions.tooLarge', { n: formatJsonlBytes(size ?? 0) }) ?? 'session too large')
+          return
+        }
+        void props.sessions?.open?.(id)
+      } catch {
+        setHidden(true)
+      }
+    })()
   }
 
   if (hidden) return null
@@ -661,6 +905,7 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
   return createPortal(
     <div ref={layerRef} className="dsd-pet-layer" data-shell={inShell ? 'true' : undefined} aria-hidden={false}>
       <button
+        ref={petRef}
         type="button"
         className="dsd-pet"
         data-kind={kind}
@@ -669,11 +914,17 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
         data-ap-click-blink={isAp && apBlink ? 'true' : undefined}
         aria-label={`${props.t?.('pet.title') ?? 'pet'} · ${kindLabel(kind, props.t)}`}
         style={{ left: pos.x, top: pos.y, width: size, height: petHeight }}
-        onPointerDown={onPointerDown as never}
-        onPointerMove={onPointerMove as never}
-        onPointerUp={onPointerUp as never}
-        onPointerCancel={onPointerUp as never}
       >
+        <span
+          className="dsd-pet__hit"
+          aria-hidden="true"
+          onPointerEnter={() => { syncDesktopIgnore(true) }}
+          onPointerLeave={() => { syncDesktopIgnore(false) }}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove as never}
+          onPointerUp={onPointerUp as never}
+          onPointerCancel={onPointerUp as never}
+        />
         {/* One sprite slot: the status sprite, or a reaction overlaid through the
             same double-buffer (so a click never shows a blank decode frame). */}
         <span className="dsd-pet__art">
@@ -682,7 +933,8 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
             : displaySprite.type === 'video'
               ? <PetVideo
                   src={displaySprite.src}
-                  loop={!isReaction}
+                  loop={petVideoShouldLoop({ kind, isReaction })}
+                  play={petVideoShouldPlay({ kind, isReaction })}
                   onEnded={isReaction ? clearReaction : undefined}
                 />
               : displaySprite.type === 'ap'
@@ -700,14 +952,21 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
           {props.t?.('pet.desktop.failed') ?? '桌面依赖准备失败'}
         </div>
       )}
-      <div
+      {bubbleOpen && <div
+        ref={calloutRef}
         className="dsd-pet__callout"
         data-kind={kind}
+        data-cards={apCards.length > 0 ? 'true' : undefined}
         data-below={calloutAbove ? undefined : 'true'}
+        data-anchor={calloutAbove ? 'above' : undefined}
         data-celebrating={celebrating ? 'true' : undefined}
-        style={{ left: calloutCenterX, top: calloutTop }}
+        style={calloutAbove
+          ? { left: calloutCenterX, bottom: calloutBottom, top: 'auto', maxHeight: calloutHeight }
+          : { left: calloutCenterX, top: calloutTop }}
+        onPointerEnter={() => { syncDesktopIgnore(true) }}
+        onPointerLeave={() => { syncDesktopIgnore(false) }}
       >
-        {celebrating && kind !== 'error' && kind !== 'awaiting' ? (
+        {celebrating && kind !== 'error' && (
           <>
             <span className="dsd-pet__callout__head">{props.t?.('pet.bubble.completed') ?? '任务完成啦🎉'}</span>
             {completedList.length > 0 ? (
@@ -725,7 +984,8 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
               <span className="dsd-pet__callout__sub">{props.t?.('pet.completed.sub') ?? ''}</span>
             )}
           </>
-        ) : kind === 'idle' ? (
+        )}
+        {kind === 'idle' && !celebrating ? (
           <>
             <span className="dsd-pet__callout__head">{props.t?.('pet.bubble.idle') ?? '休息中'}</span>
             <span className="dsd-pet__callout__sub">
@@ -755,10 +1015,13 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
           </>
         ) : (
           <>
-            {runningRows.length > 0 && (
+            {(runningRows.length > 0 || apCards.length > 0) && (
               <>
-                <span className="dsd-pet__callout__head">{bubbleText('running', runningRows.length, props.t)}</span>
-                {bubbleRows('running', entries, subagentDetail, props.t).map(row => (
+                <span className="dsd-pet__callout__head">{bubbleText('running', Math.max(runningRows.length, apCards.length), props.t)}</span>
+                {(runningRows.length > 0
+                  ? bubbleRows('running', entries, subagentDetail, props.t)
+                  : apCards.map(card => ({ id: card.id, text: card.title || card.id }))
+                ).map(row => (
                   <button
                     key={row.id}
                     type="button"
@@ -799,20 +1062,29 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
             session-store `kind` (which can lag). Collapsed by default; click to expand. */}
         {apCards.length > 0 && (
         <div className="dsd-pet__cards">
-          {cardsOpen ? (
+          {(() => {
+            const shown = cardsOpen ? apCards : []
+            return (
             <>
               <button
                 type="button"
                 className="dsd-pet__callout__toggle"
-                onClick={() => setCardsOpen(false)}
+                onPointerDown={event => event.stopPropagation()}
+                onClick={event => {
+                  event.stopPropagation()
+                  event.preventDefault()
+                  setCardsOpen(open => !open)
+                }}
               >
-                <span className="dsd-pet__callout__chevron">▾</span>
-                {props.t?.('pet.cards.hide') ?? '收起进度'}
+                <span className="dsd-pet__callout__chevron">{cardsOpen ? '▾' : '▸'}</span>
+                {cardsOpen
+                  ? (props.t?.('pet.cards.hide') ?? '收起进度')
+                  : (props.t?.('pet.cards.show') ?? `会话进度 (${apCards.length})`)}
               </button>
-              {apCards.map(card => (
+              {shown.map(card => (
                 <div key={card.id} className="dsd-pet__card" data-phase={card.view.phase}>
                   <div className="dsd-pet__card__head">
-                    <span className="dsd-pet__card__title">{card.title ?? card.id}</span>
+                    <span className="dsd-pet__card__title">{card.title || card.id}</span>
                     <span className="dsd-pet__card__label">{card.view.label}</span>
                     <span className="dsd-pet__card__pct">{Math.round(card.view.progress)}%</span>
                   </div>
@@ -841,23 +1113,17 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
                 </div>
               ))}
             </>
-          ) : (
-            <button
-              type="button"
-              className="dsd-pet__callout__toggle"
-              onClick={() => setCardsOpen(true)}
-            >
-              <span className="dsd-pet__callout__chevron">▸</span>
-              {props.t?.('pet.cards.show') ?? `会话进度 (${apCards.length})`}
-            </button>
-          )}
+            )
+          })()}
         </div>
       )}
-      </div>
+      </div>}
       {modeMenu && (
         <div
           className="dsd-pet__mode-menu"
           style={{ left: pos.x + size / 2, top: pos.y + petHeight - 4, transform: 'translate(-50%, 0)' }}
+          onPointerEnter={() => { syncDesktopIgnore(true) }}
+          onPointerLeave={() => { syncDesktopIgnore(false) }}
         >
           <span className="dsd-pet__mode-menu__title">{props.t?.('pet.mode') ?? '运行位置'}</span>
           <button
@@ -867,6 +1133,8 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
             onClick={() => {
               setDesktopError(null)
               setModeMenu(false)
+              setDesktopActive(false)
+              setDesktopReady(false)
               void props.update?.({ petDesktop: false })
               void fetch(`${PET_DESKTOP_PREFIX}/close`, { method: 'POST', headers: CSRF_HEADERS, body: JSON.stringify({ petDesktop: false }) })
             }}

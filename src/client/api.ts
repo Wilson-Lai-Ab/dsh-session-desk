@@ -14,6 +14,7 @@ export interface LiveSessionRow {
   cwd: string
   path: string
   bytes: number
+  jsonlBytes?: number
 }
 
 export interface RootInfo {
@@ -24,6 +25,7 @@ export interface RootInfo {
 export interface TrashRow extends TrashManifest {
   trashId: string
   memberCount?: number
+  kind?: 'entry' | 'orphan'
 }
 
 interface Envelope<T> {
@@ -87,14 +89,14 @@ export async function restore(trashId: string): Promise<{ path: string }> {
   return body.data
 }
 
-export async function purge(input: { trashId: string } | { all: true }): Promise<{ removed?: number }> {
+export async function purge(input: { trashId: string } | { all: true }): Promise<{ removed?: number; orphanRemoved?: number; bytesFreed?: number }> {
   const response = await fetch(`${PREFIX}/purge`, {
     method: 'POST',
     credentials: 'same-origin',
     headers: MUTATION_HEADERS,
     body: JSON.stringify(input),
   })
-  const body = await readEnvelope<{ removed?: number }>(response)
+  const body = await readEnvelope<{ removed?: number; orphanRemoved?: number; bytesFreed?: number }>(response)
   if (!body.ok) fail(body, 'purge failed')
   return body.data ?? {}
 }

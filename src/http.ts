@@ -7,6 +7,8 @@ import { join } from 'node:path'
 import type { createTrashStore } from './trash/store.ts'
 import type { SessionsRootSource } from './sessions-root.ts'
 import { foldSnapshotRows, type AnswerSessionRow } from './answer/fold.ts'
+import { collectDescendants, type CascadeInput, type CascadeRow } from './trash/cascade.ts'
+import type { TrashManifest } from './trash/types.ts'
 import { initialProgressState, deriveView } from './answer/progress.ts'
 import type { AnswerPetSnapshot } from './answer/engine.ts'
 
@@ -37,7 +39,10 @@ export interface DeskHttpRequest {
 
 export interface DeskHttpResponse {
   writeHead(status: number, headers?: Record<string, string>): void
+  write?(chunk: string | Uint8Array): boolean | undefined
   end(body?: string | Uint8Array): void
+  on?(event: string, listener: (...args: unknown[]) => void): void
+  off?(event: string, listener: (...args: unknown[]) => void): void
 }
 
 export interface SessionDeskHandlerOptions {
@@ -118,6 +123,45 @@ function detachLiveEntry(target: object | undefined, id: string): boolean {
     return true
   } catch {
     return false
+  }
+}
+
+function cascadeInputFromListed(rows: readonly unknown[]): CascadeInput {
+  const byId: Record<string, CascadeRow> = {}
+  for (const row of rows) {
+    if (row === null || typeof row !== 'object') continue
+    const rec = row as Record<string, unknown>
+    const id = sessionIdOf(row)
+    if (id === undefined) continue
+    const parentId = typeof rec.parentId === 'string'
+      ? rec.parentId
+      : typeof rec.parentSessionId === 'string'
+        ? rec.parentSessionId
+        : undefined
+    const origin = typeof rec.origin === 'string' ? rec.origin : undefined
+    byId[id] = { id, parentId, origin }
+  }
+  return { byId }
+}
+
+function memberIdsOf(row: TrashManifest): string[] {
+  const ids = [row.sessionId, ...(row.members ?? []).map(member => member.sessionId)]
+  return [...new Set(ids.filter(id => id !== ''))]
+}
+
+function unloadSession(sessions: object, agents: object | undefined, id: string): void {
+  probeSessionForget(sessions, id)
+  cancelLiveAgent(agents, id)
+  detachLiveEntry(agents, id)
+  detachLiveEntry(sessions, id)
+}
+
+async function unloadMissingLiveSessions(opts: SessionDeskHandlerOptions): Promise<void> {
+  const onDisk = new Set((await opts.store.listLive()).map(row => row.sessionId))
+  for (const row of listedSessions(opts.sessions)) {
+    const id = sessionIdOf(row)
+    if (id === undefined || onDisk.has(id)) continue
+    unloadSession(opts.sessions, opts.agents, id)
   }
 }
 
@@ -353,6 +397,29 @@ export function createSessionDeskHandler(opts: SessionDeskHandlerOptions) {
         writeJson(res, 200, { ok: true, data: fallback })
         return
       }
+      if (method === 'GET' && path === `${ANSWER_PET_PREFIX}/events`) {
+        res.writeHead(200, {
+          'content-type': 'text/event-stream; charset=utf-8',
+          'cache-control': 'no-store',
+          connection: 'keep-alive',
+        })
+        const send = (): void => {
+          const data = opts.answerPet !== undefined
+            ? opts.answerPet.snapshot()
+            : {
+              view: deriveView(initialProgressState()),
+              trace: [],
+              session: null,
+              running: foldSnapshotRows(listedSessions(opts.sessions) as AnswerSessionRow[]),
+              active: false,
+            }
+          res.write?.(`data: ${JSON.stringify({ ok: true, data })}\n\n`)
+        }
+        send()
+        const unsub = opts.answerPet?.subscribeEdges(() => send()) ?? (() => {})
+        res.on?.('close', () => { unsub() })
+        return
+      }
       if (method !== 'POST') {
         writeJson(res, 405, { ok: false, error: 'method not allowed' })
         return
@@ -374,19 +441,15 @@ export function createSessionDeskHandler(opts: SessionDeskHandlerOptions) {
         }
         const cwd = typeof body.cwd === 'string' ? body.cwd : undefined
         const title = typeof body.title === 'string' ? body.title : sessionId
-        const allIds = [...new Set(sessionIds.length > 0 ? sessionIds : [sessionId])]
+        const descendants = collectDescendants(sessionId, cascadeInputFromListed(listedSessions(opts.sessions)))
+        const allIds = [...new Set([sessionId, ...sessionIds, ...descendants])]
         for (const id of allIds) await switchAwayIfCurrent(opts.sessions, id, id === sessionId ? cwd : undefined)
-        const result = await opts.store.trash({ sessionId, cwd, title, ...(sessionIds.length > 0 ? { sessionIds } : {}) })
+        const result = await opts.store.trash({ sessionId, cwd, title, sessionIds: allIds })
         if (!result.ok) {
           writeJson(res, result.code === 'not-found' ? 404 : 500, { ok: false, error: result.message, code: result.code })
           return
         }
-        for (const id of allIds) {
-          probeSessionForget(opts.sessions, id)
-          cancelLiveAgent(opts.agents, id)
-          detachLiveEntry(opts.agents, id)
-          detachLiveEntry(opts.sessions, id)
-        }
+        for (const id of result.sessionIds) unloadSession(opts.sessions, opts.agents, id)
         writeJson(res, 200, { ok: true, data: { trashId: result.trashId } })
         return
       }
@@ -407,8 +470,12 @@ export function createSessionDeskHandler(opts: SessionDeskHandlerOptions) {
       }
       if (path === `${API_PREFIX}/purge`) {
         if (body.all === true) {
+          const rows = await opts.store.listTrash()
+          const memberIds = rows.flatMap(memberIdsOf)
           const result = await opts.store.purgeAll()
-          writeJson(res, 200, { ok: true, data: { removed: result.removed } })
+          for (const id of memberIds) unloadSession(opts.sessions, opts.agents, id)
+          await unloadMissingLiveSessions(opts)
+          writeJson(res, 200, { ok: true, data: { removed: result.removed, orphanRemoved: result.orphanRemoved, bytesFreed: result.bytesFreed } })
           return
         }
         const trashId = typeof body.trashId === 'string' ? body.trashId : ''
@@ -416,10 +483,15 @@ export function createSessionDeskHandler(opts: SessionDeskHandlerOptions) {
           writeJson(res, 400, { ok: false, error: 'missing trashId' })
           return
         }
+        const rows = await opts.store.listTrash()
+        const row = rows.find(item => item.trashId === trashId)
         const result = await opts.store.purge(trashId)
         if (!result.ok) {
           writeJson(res, result.code === 'not-found' ? 404 : 500, { ok: false, error: result.message, code: result.code })
           return
+        }
+        if (row !== undefined) {
+          for (const id of memberIdsOf(row)) unloadSession(opts.sessions, opts.agents, id)
         }
         writeJson(res, 200, { ok: true })
         return

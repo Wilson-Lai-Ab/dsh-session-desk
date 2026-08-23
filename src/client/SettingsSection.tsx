@@ -290,7 +290,13 @@ export function SettingsSection(props: SessionDeskSectionProps): ReactNode {
             <select
               value={settings.petDesktop ? 'desktop' : 'browser'}
               onChange={(event: ChangeEvent<HTMLSelectElement>) => {
-                void persist({ petDesktop: event.target.value === 'desktop' })
+                const desktop = event.target.value === 'desktop'
+                void persist({ petDesktop: desktop })
+                void fetch('/session-desk/pet-desktop/' + (desktop ? 'spawn' : 'close'), {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json', 'x-dsh-session-desk': '1' },
+                  body: JSON.stringify(desktop ? {} : { petDesktop: false }),
+                })
               }}
             >
               <option value="browser">{t('pet.mode.browser')}</option>

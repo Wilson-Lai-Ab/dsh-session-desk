@@ -193,6 +193,115 @@ describe('desktop-pet endpoints', () => {
     expect(r.body.download).toEqual({ stage: 'failed', pct: null, error: 'no electron binary' })
   })
 
+  it('GET /snapshot uses the session/title event as the display name without sending the log', async () => {
+    const sessions = {
+      list: () => [{
+        id: 'session-ec761be4-7e4b-44bf-b368-3118157841e0',
+        log: [
+          { type: 'session', seq: 0 },
+          { type: 'session/title', data: { title: '桌面宠物 OOM' } },
+          { type: 'assistant/chunk', data: { text: 'x'.repeat(80) } },
+        ],
+      }],
+    }
+    const { handler } = handlerWith({
+      sessions,
+      getAnswerPet: () => ({ running: [{ id: 'session-ec761be4-7e4b-44bf-b368-3118157841e0' }], active: true }),
+    })
+    const r = await call(handler, 'GET', `${PET_DESKTOP_PREFIX}/snapshot?token=tok`)
+    expect(r.status).toBe(200)
+    expect(r.body.sessions.items[0].title).toBe('桌面宠物 OOM')
+    expect(r.body.answerPet.running[0].title).toBe('桌面宠物 OOM')
+    expect(JSON.stringify(r.body)).not.toContain('assistant/chunk')
+  })
+
+  it('GET /snapshot prefers the live answer-pet title over a missing row title', async () => {
+    const { handler } = handlerWith({
+      sessions: { list: () => [{ id: 's1' }] },
+      getAnswerPet: () => ({ running: [{ id: 's1', title: '调研插件核心实现' }], active: true }),
+    })
+    const r = await call(handler, 'GET', `${PET_DESKTOP_PREFIX}/snapshot?token=tok`)
+    expect(r.body.sessions.items[0]).toEqual({ id: 's1', title: '调研插件核心实现', running: true })
+  })
+
+  it('GET /snapshot projects live Session rows without log or events', async () => {
+    const log = Array.from({ length: 50 }, (_, i) => ({ seq: i, type: 'assistant/chunk', data: { text: 'x'.repeat(200) } }))
+    const sessions = {
+      list: () => [{
+        id: 's1',
+        title: 'chat',
+        log,
+        events: log,
+        eventsSnapshot: log,
+        header: { id: 's1', origin: 'subagent', parentSession: 'parent-1' },
+        surfaceManager: { huge: true },
+      }],
+    }
+    const { handler } = handlerWith({ sessions })
+    const r = await call(handler, 'GET', `${PET_DESKTOP_PREFIX}/snapshot?token=tok`)
+    expect(r.status).toBe(200)
+    expect(r.body.sessions.items).toEqual([
+      { id: 's1', title: 'chat', origin: 'subagent', parentSessionId: 'parent-1' },
+    ])
+    const encoded = JSON.stringify(r.body)
+    expect(encoded).not.toContain('assistant/chunk')
+    expect(encoded.length).toBeLessThan(2000)
+  })
+
+  it('GET /snapshot marks listed sessions running from the live answer-pet engine', async () => {
+    const sessions = {
+      list: () => [{ id: 's1', title: 'chat' }, { id: 's2', title: 'other' }],
+    }
+    const { handler } = handlerWith({
+      sessions,
+      getAnswerPet: () => ({ running: [{ id: 's1' }], active: true }),
+    })
+    const r = await call(handler, 'GET', `${PET_DESKTOP_PREFIX}/snapshot?token=tok`)
+    expect(r.status).toBe(200)
+    expect(r.body.sessions.items).toEqual([
+      { id: 's1', title: 'chat', running: true },
+      { id: 's2', title: 'other' },
+    ])
+    expect(r.body.answerPet.running).toEqual([{ id: 's1', title: 'chat' }])
+  })
+
+  it('GET /events streams a snapshot and unsubscribes when the client closes', async () => {
+    const unsub = vi.fn()
+    const subscribeEdges = vi.fn(() => unsub)
+    const { handler } = handlerWith({
+      sessions: { list: () => [{ id: 's1', title: 'chat' }] },
+      getAnswerPet: () => ({ running: [], active: false }),
+      subscribeEdges,
+    })
+    const writes: string[] = []
+    const listeners = new Map<string, () => void>()
+    const res = {
+      status: 0,
+      headers: {} as Record<string, string>,
+      writeHead(s: number, h?: Record<string, string>) {
+        res.status = s
+        res.headers = h ?? {}
+      },
+      write(chunk: string) { writes.push(String(chunk)); return true },
+      end() {},
+      on(event: string, listener: () => void) { listeners.set(event, listener) },
+    }
+    const req = {
+      method: 'GET',
+      url: `${PET_DESKTOP_PREFIX}/events?token=tok`,
+      headers: { host: '127.0.0.1:3080' },
+      [Symbol.asyncIterator]: async function* () {},
+    }
+    await handler(req as never, res as never)
+    expect(res.status).toBe(200)
+    expect(res.headers['content-type']).toContain('text/event-stream')
+    expect(writes[0]).toMatch(/^data: /)
+    expect(JSON.parse(writes[0]!.slice(5).trim()).sessions.items).toEqual([{ id: 's1', title: 'chat' }])
+    expect(subscribeEdges).toHaveBeenCalled()
+    listeners.get('close')?.()
+    expect(unsub).toHaveBeenCalled()
+  })
+
   it('GET /snapshot includes petDesktop so the overlay can highlight the current mode', async () => {
     const { handler } = handlerWith({
       getPetSettings: () => ({ petImage: 'x.png', petDesktop: true, petTheme: 'blue-whale' }),

@@ -12,10 +12,29 @@ export const cssText = `
   z-index: 240;
   pointer-events: none;
 }
-.dsd-pet-layer[data-shell] .dsd-pet,
+body:has([aria-modal="true"]) .dsd-pet-layer {
+  display: none;
+}
+.dsd-pet-layer[data-shell] .dsd-pet__hit,
 .dsd-pet-layer[data-shell] .dsd-pet__callout,
-.dsd-pet-layer[data-shell] .dsd-pet__mode-menu {
+.dsd-pet-layer[data-shell] .dsd-pet__mode-menu,
+.dsd-pet-layer[data-shell] .dsd-pet__preparing {
   pointer-events: auto;
+}
+.dsd-pet-layer[data-shell] {
+  overflow: visible;
+}
+.dsd-pet-layer[data-shell] .dsd-pet {
+  pointer-events: none;
+  overflow: visible;
+}
+.dsd-pet-layer[data-shell] .dsd-pet__callout {
+  max-height: min(220px, calc(100vh - 220px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.dsd-pet__callout[data-anchor="above"] {
+  transform: translate(-50%, 0);
 }
 .dsd-pet {
   position: fixed;
@@ -24,19 +43,31 @@ export const cssText = `
   border: 0;
   background: transparent;
   cursor: grab;
-  pointer-events: auto;
+  pointer-events: none;
   display: grid;
   place-items: center;
   overflow: visible;
   touch-action: none;
   user-select: none;
+  contain: layout;
 }
 .dsd-pet:active {
   cursor: grabbing;
 }
-.dsd-pet[data-kind="running"],
-.dsd-pet[data-kind="subagent"] {
-  animation: dsd-pet-bob 1.1s ease-in-out infinite;
+.dsd-pet__hit {
+  position: absolute;
+  left: 50%;
+  top: 58%;
+  width: 52%;
+  height: 72%;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  cursor: grab;
+  z-index: 1;
+}
+.dsd-pet[data-kind="running"] .dsd-pet__art,
+.dsd-pet[data-kind="subagent"] .dsd-pet__art {
+  animation: dsd-pet-bob 2.4s ease-in-out infinite;
 }
 .dsd-pet[data-kind="awaiting"] .dsd-pet__art {
   filter: drop-shadow(0 0 6px #f59e0b);
@@ -56,11 +87,19 @@ export const cssText = `
 .dsd-pet__art {
   position: relative;
 }
+.dsd-pet__art svg {
+  pointer-events: visiblePainted;
+  cursor: grab;
+}
+.dsd-pet__art img,
+.dsd-pet__art video {
+  pointer-events: none;
+}
 .dsd-pet__art img {
   object-fit: contain;
 }
 .dsd-pet__art video {
-  object-fit: fill;
+  object-fit: contain;
 }
 .dsd-pet__art img[src$="whale.png"] {
   animation: dsd-pet-float 3.2s ease-in-out infinite;
@@ -70,7 +109,7 @@ export const cssText = `
   inset: 0;
   width: 100%;
   height: 100%;
-  object-fit: fill;
+  object-fit: contain;
   opacity: 0;
 }
 .dsd-pet__layer--on {
@@ -96,6 +135,10 @@ export const cssText = `
 }
 .dsd-pet__callout__head {
   white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: inherit;
 }
 .dsd-pet__callout__toggle {
   display: flex;
@@ -202,7 +245,9 @@ export const cssText = `
 .dsd-pet__callout[data-kind="running"]::after { border-top-color: #1e3a8a; }
 .dsd-pet__callout[data-kind="subagent"] { background: #1e3a8a; }
 .dsd-pet__callout[data-kind="subagent"]::after { border-top-color: #1e3a8a; }
-.dsd-pet__callout[data-kind="idle"],
+.dsd-pet__callout[data-kind="idle"] {
+  pointer-events: none;
+}
 .dsd-pet__callout[data-kind="error"] { pointer-events: none; }
 .dsd-pet__callout[data-celebrating] { pointer-events: auto; }
 .dsd-pet__callout[data-below] { transform: translate(-50%, 0); }
@@ -243,7 +288,7 @@ export const cssText = `
   border-top: 1px solid rgba(255, 255, 255, 0.18);
   padding-top: 6px;
   white-space: normal;
-  max-height: min(340px, 40vh);
+  max-height: 168px;
   overflow-y: auto;
 }
 .dsd-pet__card {
@@ -428,11 +473,14 @@ export const cssText = `
 
 export function adoptPetStyles(): void {
   if (typeof document === 'undefined') return
-  if (document.getElementById(STYLE_ID) !== null) return
-  const style = document.createElement('style')
-  style.id = STYLE_ID
-  style.dataset.plugin = 'dsh-session-desk'
-  style.dataset.pluginCss = STYLE_ID
-  style.textContent = `${cssText}\n${apThemesCss()}`
-  document.head.appendChild(style)
+  const next = `${cssText}\n${apThemesCss()}`
+  let style = document.getElementById(STYLE_ID)
+  if (style === null) {
+    style = document.createElement('style')
+    style.id = STYLE_ID
+    style.dataset.plugin = 'dsh-session-desk'
+    style.dataset.pluginCss = STYLE_ID
+    document.head.appendChild(style)
+  }
+  if (style.textContent !== next) style.textContent = next
 }

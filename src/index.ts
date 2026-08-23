@@ -221,6 +221,8 @@ export function apply(ctx: unknown, config?: { sessionsRoot?: string }): void {
         updatePetSetting,
         token: petToken,
         state: petState,
+        getAnswerPet: () => answerPet?.snapshot(),
+        subscribeEdges: answerPet ? (sink) => answerPet.subscribeEdges(() => sink()) : undefined,
         shellAssets: {
           rendererHtml: fileURLToPath(new URL('./desktop/renderer.html', import.meta.url)),
           rendererJs: fileURLToPath(new URL('./desktop-renderer.js', import.meta.url)),

@@ -1,4 +1,4 @@
-import { header, routeOf, writeJson, readJsonBody, mutationAllowed, asRecord, validateLoopbackHost, listedSessions, type DeskHttpRequest, type DeskHttpResponse } from '../http.ts'
+import { header, routeOf, writeJson, readJsonBody, mutationAllowed, asRecord, validateLoopbackHost, listedSessions, sessionIdOf, type DeskHttpRequest, type DeskHttpResponse } from '../http.ts'
 import { readFile } from 'node:fs/promises'
 import type { SessionDeskSettings } from '../shared.ts'
 import type { DesktopPetController } from './lifecycle.ts'
@@ -13,6 +13,12 @@ export interface DesktopPetHandlerOptions {
   token: string
   state: { pendingOpen: { id: string; at: number } | null }
   shellAssets?: { rendererHtml: string; rendererJs: string }
+  getAnswerPet?: () => {
+    running?: readonly { id?: string; title?: string | null }[]
+    session?: { id?: string; title?: string | null } | null
+    active?: boolean
+  } | undefined
+  subscribeEdges?: (sink: () => void) => () => void
 }
 
 export function createDesktopPetHandler(opts: DesktopPetHandlerOptions) {
@@ -46,7 +52,23 @@ export function createDesktopPetHandler(opts: DesktopPetHandlerOptions) {
     }
     if (method === 'GET' && path === `${PET_DESKTOP_PREFIX}/snapshot`) {
       if (token !== opts.token) { writeJson(res, 403, { ok: false, error: 'bad token' }); return }
-      writeJson(res, 200, { ok: true, sessions: { items: listedSessions(opts.sessions) }, settings: opts.getPetSettings() })
+      writeJson(res, 200, desktopSnapshot(opts))
+      return
+    }
+    if (method === 'GET' && path === `${PET_DESKTOP_PREFIX}/events`) {
+      if (token !== opts.token) { writeJson(res, 403, { ok: false, error: 'bad token' }); return }
+      res.writeHead(200, {
+        'content-type': 'text/event-stream; charset=utf-8',
+        'cache-control': 'no-store',
+        connection: 'keep-alive',
+      })
+      const send = (): void => {
+        res.write?.(`data: ${JSON.stringify(desktopSnapshot(opts))}\n\n`)
+      }
+      send()
+      const unsub = opts.subscribeEdges?.(send) ?? (() => {})
+      const onClose = (): void => { unsub() }
+      res.on?.('close', onClose)
       return
     }
     if (method !== 'POST') { writeJson(res, 405, { ok: false, error: 'method not allowed' }); return }
@@ -105,6 +127,109 @@ export function createDesktopPetHandler(opts: DesktopPetHandlerOptions) {
     }
     writeJson(res, 404, { ok: false, error: 'not found' })
   }
+}
+
+function desktopSnapshot(opts: DesktopPetHandlerOptions) {
+  const answerPet = opts.getAnswerPet?.() ?? { running: [], active: false }
+  const titles = titleIndex(answerPet)
+  const runningIds = new Set((answerPet.running ?? []).map(card => card.id).filter((id): id is string => typeof id === 'string' && id !== ''))
+  const items = listedSessions(opts.sessions).map(row => {
+    const projected = projectDesktopSession(row)
+    const id = typeof projected.id === 'string' ? projected.id : undefined
+    if (id !== undefined && titles.has(id)) {
+      projected.title = titles.get(id)
+    } else if (id !== undefined && typeof projected.title !== 'string') {
+      const folded = cachedTitleFromLog(id, row)
+      if (folded !== undefined) projected.title = folded
+    }
+    if (id !== undefined && runningIds.has(id) && projected.running !== true) {
+      return { ...projected, running: true }
+    }
+    return projected
+  })
+  const titleById = new Map<string, string>()
+  for (const item of items) {
+    if (typeof item.id === 'string' && typeof item.title === 'string' && item.title !== '') {
+      titleById.set(item.id, item.title)
+    }
+  }
+  const running = (answerPet.running ?? []).map(card => {
+    if (card === null || typeof card !== 'object') return card
+    const rec = card as { id?: string; title?: string | null }
+    if (typeof rec.id !== 'string') return card
+    if (typeof rec.title === 'string' && rec.title !== '') return card
+    const title = titles.get(rec.id) ?? titleById.get(rec.id)
+    return title === undefined ? card : { ...rec, title }
+  })
+  return { ok: true, sessions: { items }, settings: opts.getPetSettings(), answerPet: { ...answerPet, running } }
+}
+
+/** Last `session/title` per live session. Walks `log` once; never copies it into JSON. */
+const titlesFromLog = new Map<string, string>()
+
+function cachedTitleFromLog(id: string, row: unknown): string | undefined {
+  const cached = titlesFromLog.get(id)
+  if (cached !== undefined) return cached
+  if (row === null || typeof row !== 'object') return undefined
+  const log = (row as { log?: unknown }).log
+  if (!Array.isArray(log)) return undefined
+  let title: string | undefined
+  for (const event of log) {
+    if (event === null || typeof event !== 'object') continue
+    const rec = event as { type?: unknown; data?: unknown }
+    if (rec.type !== 'session/title') continue
+    const data = rec.data
+    if (data !== null && typeof data === 'object') {
+      const next = (data as { title?: unknown }).title
+      if (typeof next === 'string' && next !== '') title = next
+    }
+  }
+  if (title !== undefined) titlesFromLog.set(id, title)
+  return title
+}
+
+function titleIndex(answerPet: { running?: readonly { id?: string; title?: string | null }[]; session?: { id?: string; title?: string | null } | null }): Map<string, string> {
+  const titles = new Map<string, string>()
+  const take = (id: string | undefined, title: string | null | undefined): void => {
+    if (typeof id !== 'string' || id === '') return
+    if (typeof title !== 'string' || title === '') return
+    titles.set(id, title)
+  }
+  take(answerPet.session?.id, answerPet.session?.title)
+  for (const card of answerPet.running ?? []) take(card.id, card.title)
+  return titles
+}
+
+/**
+ * Pet overlay only needs identity + status flags. Host `sessions.list()` returns
+ * live Session objects whose enumerable `log` / `events` are the full expanded
+ * transcript — JSON.stringify of those on every assistant/chunk is the desktop
+ * OOM path (Utf8Length / Buffer.byteLength).
+ */
+function projectDesktopSession(row: unknown): Record<string, unknown> {
+  if (typeof row === 'string') return { id: row }
+  if (row === null || typeof row !== 'object') return {}
+  const rec = row as Record<string, unknown>
+  const header = rec.header !== null && typeof rec.header === 'object'
+    ? rec.header as Record<string, unknown>
+    : undefined
+  const out: Record<string, unknown> = {}
+  const id = sessionIdOf(row)
+  if (id !== undefined) out.id = id
+  if (typeof rec.title === 'string' && rec.title !== '') out.title = rec.title
+  if (typeof rec.displayTitle === 'string' && rec.displayTitle !== '') out.displayTitle = rec.displayTitle
+  if (typeof rec.openState === 'string') out.openState = rec.openState
+  if (rec.running === true) out.running = true
+  if (typeof rec.pendingInteraction === 'string' && rec.pendingInteraction !== '') {
+    out.pendingInteraction = rec.pendingInteraction
+  }
+  if (rec.error === true || typeof rec.error === 'string') out.error = rec.error
+  if (rec.failed === true) out.failed = true
+  const origin = rec.origin ?? header?.origin
+  if (typeof origin === 'string') out.origin = origin
+  const parent = rec.parentId ?? rec.parentSessionId ?? header?.parentSession
+  if (typeof parent === 'string' && parent !== '') out.parentSessionId = parent
+  return out
 }
 
 /** Serve a static shell file verbatim, 404 when absent. Mirrors createPetAssetHandler. */

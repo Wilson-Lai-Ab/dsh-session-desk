@@ -19,10 +19,35 @@ function parseArgs(argv) {
   return { base, token }
 }
 
-const WIN_W = 520
+const WIN_W = 420
 const WIN_H = 640
 
 let win = null
+let lastIgnore = null
+let lastX = null
+let lastY = null
+let dragOffset = null
+let dragTimer = null
+let paintActive = false
+
+function applyPaintRate() {
+  if (!win) return
+  win.webContents.setFrameRate(paintActive || dragOffset !== null ? 15 : 1)
+}
+
+function applyPosition(nx, ny) {
+  if (!win) return
+  if (lastX === nx && lastY === ny) return
+  lastX = nx
+  lastY = ny
+  win.setPosition(nx, ny)
+}
+
+function tickDrag() {
+  if (!win || dragOffset === null) return
+  const cursor = screen.getCursorScreenPoint()
+  applyPosition(Math.round(cursor.x - dragOffset.x), Math.round(cursor.y - dragOffset.y))
+}
 
 app.whenReady().then(() => {
   const { base, token } = parseArgs(process.argv.slice(2))
@@ -47,15 +72,48 @@ app.whenReady().then(() => {
   })
   win.setAlwaysOnTop(true, 'floating')
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  win.webContents.setFrameRate(1)
+  win.webContents.setBackgroundThrottling(true)
   win.loadURL(`${base}/session-desk/pet-desktop/renderer.html?token=${encodeURIComponent(token)}`)
-  win.once('ready-to-show', () => { win?.show() })
+  win.once('ready-to-show', () => {
+    win?.setIgnoreMouseEvents(true, { forward: true })
+    win?.show()
+  })
   win.on('closed', () => {
     win = null
     app.quit()
   })
 })
 
-ipcMain.on('move-window', (_event, x, y) => {
+ipcMain.on('set-ignore-mouse', (_event, ignore) => {
   if (!win) return
-  win.setPosition(Math.round(Number(x) || 0), Math.round(Number(y) || 0))
+  const next = Boolean(ignore)
+  if (lastIgnore === next) return
+  lastIgnore = next
+  win.setIgnoreMouseEvents(next, { forward: true })
+})
+
+ipcMain.on('move-window', (_event, x, y) => {
+  applyPosition(Math.round(Number(x) || 0), Math.round(Number(y) || 0))
+})
+
+ipcMain.on('start-drag', (_event, offsetX, offsetY) => {
+  dragOffset = { x: Number(offsetX) || 0, y: Number(offsetY) || 0 }
+  applyPaintRate()
+  if (dragTimer !== null) return
+  dragTimer = setInterval(tickDrag, 8)
+})
+
+ipcMain.on('stop-drag', () => {
+  dragOffset = null
+  if (dragTimer !== null) {
+    clearInterval(dragTimer)
+    dragTimer = null
+  }
+  applyPaintRate()
+})
+
+ipcMain.on('set-paint-active', (_event, active) => {
+  paintActive = Boolean(active)
+  applyPaintRate()
 })

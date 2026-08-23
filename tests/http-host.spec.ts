@@ -256,6 +256,108 @@ describe('session-desk host HTTP', () => {
     }
   })
 
+  it('unions live subagent descendants even when the client omits sessionIds', async () => {
+    root = await mkdtemp(join(tmpdir(), 'desk-http-'))
+    const cwd = '/Users/laiweibin/work/workSoftware/dhs-plugins'
+    const parentId = 'session-edd31b4a-43ab-40ee-9d1c-20b30693decb'
+    const childId = 'session-cccccccc-cccc-cccc-cccc-cccccccccccc'
+    const missingChildId = 'session-eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee'
+    const parentLive = liveSessionDir(root, cwd, parentId)
+    const childLive = liveSessionDir(root, cwd, childId)
+    await mkdir(parentLive, { recursive: true })
+    await writeFile(join(parentLive, 'session.jsonl.zstd'), 'x')
+    await mkdir(childLive, { recursive: true })
+    await writeFile(join(childLive, 'session.jsonl.zstd'), 'y')
+    const forgetCalls: string[] = []
+    const { api, cleanup } = mount({
+      sessionsRoot: root,
+      settings: { sessionsRoot: root, retentionDays: 30 },
+      sessions: {
+        forget(id: string) { forgetCalls.push(id) },
+        list() {
+          return {
+            byId: {
+              [parentId]: { id: parentId },
+              [childId]: { id: childId, parentId, origin: 'subagent' },
+              [missingChildId]: { id: missingChildId, parentId, origin: 'subagent' },
+            },
+          }
+        },
+      },
+    })
+    try {
+      const res = fakeRes()
+      await api(req('POST', '/session-desk/api/trash', {
+        host: '127.0.0.1',
+        'content-type': 'application/json',
+        'x-dsh-session-desk': '1',
+      }, JSON.stringify({ sessionId: parentId, cwd, title: 'root' })), res)
+      expect(res.status).toBe(200)
+      expect(JSON.parse(res.body).ok).toBe(true)
+      expect(forgetCalls).toEqual([parentId, childId])
+      const listed = fakeRes()
+      await api(req('GET', '/session-desk/api/trash', { host: '127.0.0.1' }), listed)
+      const body = JSON.parse(listed.body) as { ok: true; data: Array<{ sessionId: string; memberCount?: number }> }
+      expect(body.data).toHaveLength(1)
+      expect(body.data[0]!.memberCount).toBe(1)
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('purgeAll forgets every member and live sessions whose dirs are gone', async () => {
+    root = await mkdtemp(join(tmpdir(), 'desk-http-'))
+    const cwd = '/Users/laiweibin/work/workSoftware/dhs-plugins'
+    const parentId = 'session-edd31b4a-43ab-40ee-9d1c-20b30693decb'
+    const childId = 'session-cccccccc-cccc-cccc-cccc-cccccccccccc'
+    const zombieId = 'session-ffffffff-ffff-ffff-ffff-ffffffffffff'
+    const parentLive = liveSessionDir(root, cwd, parentId)
+    const childLive = liveSessionDir(root, cwd, childId)
+    await mkdir(parentLive, { recursive: true })
+    await writeFile(join(parentLive, 'session.jsonl.zstd'), 'x')
+    await mkdir(childLive, { recursive: true })
+    await writeFile(join(childLive, 'session.jsonl.zstd'), 'y')
+    const forgetCalls: string[] = []
+    const { api, cleanup } = mount({
+      sessionsRoot: root,
+      settings: { sessionsRoot: root, retentionDays: 30 },
+      sessions: {
+        forget(id: string) { forgetCalls.push(id) },
+        list() {
+          return {
+            byId: {
+              [parentId]: { id: parentId },
+              [childId]: { id: childId, parentId, origin: 'subagent' },
+              [zombieId]: { id: zombieId },
+            },
+          }
+        },
+      },
+    })
+    try {
+      const trashed = fakeRes()
+      await api(req('POST', '/session-desk/api/trash', {
+        host: '127.0.0.1',
+        'content-type': 'application/json',
+        'x-dsh-session-desk': '1',
+      }, JSON.stringify({ sessionId: parentId, sessionIds: [parentId, childId], cwd, title: 'root' })), trashed)
+      expect(trashed.status).toBe(200)
+      forgetCalls.length = 0
+      const purged = fakeRes()
+      await api(req('POST', '/session-desk/api/purge', {
+        host: '127.0.0.1',
+        'content-type': 'application/json',
+        'x-dsh-session-desk': '1',
+      }, '{"all":true}'), purged)
+      expect(purged.status).toBe(200)
+      expect(forgetCalls).toContain(parentId)
+      expect(forgetCalls).toContain(childId)
+      expect(forgetCalls).toContain(zombieId)
+    } finally {
+      cleanup()
+    }
+  })
+
   it('cascades sessionIds into one entry and forgets every member', async () => {
     root = await mkdtemp(join(tmpdir(), 'desk-http-'))
     const cwd = '/Users/laiweibin/work/workSoftware/dhs-plugins'

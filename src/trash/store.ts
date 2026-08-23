@@ -84,6 +84,19 @@ function isInsideSessionsRoot(root: string, dest: string): boolean {
   return rel !== '' && !rel.startsWith('..')
 }
 
+async function jsonlSize(sessionDir: string): Promise<number> {
+  for (const name of ['session.jsonl.zstd', 'session.jsonl']) {
+    try {
+      const info = await lstat(join(sessionDir, name))
+      if (info.isSymbolicLink()) continue
+      if (info.isFile()) return info.size
+    } catch {
+      /* missing encoding */
+    }
+  }
+  return 0
+}
+
 async function dirSize(path: string): Promise<number> {
   let total = 0
   let entries
@@ -229,6 +242,7 @@ export function createTrashStore(opts: TrashStoreOptions) {
           cwd: '',
           path,
           bytes: await dirSize(path),
+          jsonlBytes: await jsonlSize(path),
         })
       }
     }
@@ -249,10 +263,13 @@ export function createTrashStore(opts: TrashStoreOptions) {
     const members: Array<{ sessionId: string; path: string }> = []
     for (let i = 0; i < ids.length; i += 1) {
       const sessionId = ids[i]!
-      const cwd = i === 0 ? input.cwd : undefined
+      const cwd = sessionId === input.sessionId ? input.cwd : undefined
       const path = await resolveLive(sessionId, cwd)
-      if (path === undefined) return { ok: false, code: 'not-found', message: '磁盘上已不在，刷新列表' }
+      if (path === undefined) continue
       members.push({ sessionId, path })
+    }
+    if (members.length === 0 || members.every(member => member.sessionId !== input.sessionId)) {
+      return { ok: false, code: 'not-found', message: '磁盘上已不在，刷新列表' }
     }
     return trashMembers(members, input)
   }
@@ -284,7 +301,7 @@ export function createTrashStore(opts: TrashStoreOptions) {
         ...(members.length > 1 ? { members: members.map(m => ({ sessionId: m.sessionId, originalPath: m.path })) } : {}),
       }
       await writeFile(join(entryDir, MANIFEST), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
-      return { ok: true, trashId }
+      return { ok: true, trashId, sessionIds: members.map(member => member.sessionId) }
     } catch (error) {
       let restored = true
       for (const member of members) {
@@ -303,7 +320,7 @@ export function createTrashStore(opts: TrashStoreOptions) {
     }
   }
 
-  async function listTrash(): Promise<Array<TrashManifest & { trashId: string }>> {
+  async function listTrash(): Promise<Array<TrashManifest & { trashId: string; memberCount: number; kind: 'entry' | 'orphan' }>> {
     const root = opts.root()
     const base = trashRoot(root)
     let entries
@@ -312,13 +329,36 @@ export function createTrashStore(opts: TrashStoreOptions) {
     } catch {
       return []
     }
-    const rows: Array<TrashManifest & { trashId: string; memberCount: number }> = []
+    const rows: Array<TrashManifest & { trashId: string; memberCount: number; kind: 'entry' | 'orphan' }> = []
     for (const entry of entries) {
-      if (!entry.isDirectory()) continue
-      const manifest = await readManifest(join(base, entry.name))
-      if (manifest === undefined) continue
-      const memberCount = manifest.members !== undefined ? manifest.members.length - 1 : 0
-      rows.push({ ...manifest, trashId: entry.name, memberCount })
+      if (!isSafeTrashId(entry.name)) continue
+      const entryDir = join(base, entry.name)
+      let info
+      try {
+        info = await lstat(entryDir)
+      } catch {
+        continue
+      }
+      if (info.isSymbolicLink() || !info.isDirectory()) continue
+      const manifest = await readManifest(entryDir)
+      if (manifest !== undefined) {
+        const memberCount = manifest.members !== undefined ? manifest.members.length - 1 : 0
+        rows.push({ ...manifest, trashId: entry.name, memberCount, kind: 'entry' })
+        continue
+      }
+      const bytes = await dirSize(entryDir)
+      rows.push({
+        version: 1,
+        sessionId: '',
+        cwd: '',
+        title: entry.name,
+        deletedAt: info.mtimeMs,
+        originalPath: '',
+        bytes,
+        trashId: entry.name,
+        memberCount: 0,
+        kind: 'orphan',
+      })
     }
     rows.sort((a, b) => b.deletedAt - a.deletedAt)
     return rows
@@ -386,14 +426,19 @@ export function createTrashStore(opts: TrashStoreOptions) {
     }
   }
 
-  async function purgeAll(): Promise<{ ok: true; removed: number }> {
+  async function purgeAll(): Promise<{ ok: true; removed: number; orphanRemoved: number; bytesFreed: number }> {
     const rows = await listTrash()
     let removed = 0
+    let orphanRemoved = 0
+    let bytesFreed = 0
     for (const row of rows) {
       const result = await purge(row.trashId)
-      if (result.ok) removed += 1
+      if (!result.ok) continue
+      removed += 1
+      bytesFreed += row.bytes
+      if (row.kind === 'orphan') orphanRemoved += 1
     }
-    return { ok: true, removed }
+    return { ok: true, removed, orphanRemoved, bytesFreed }
   }
 
   async function sweepExpired(): Promise<{ removed: number }> {
