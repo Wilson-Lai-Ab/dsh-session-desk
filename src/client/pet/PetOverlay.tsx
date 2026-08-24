@@ -7,8 +7,7 @@ import { createPortal } from 'react-dom'
 import { DEFAULT_SETTINGS, clampPetSize, type SessionDeskSettings } from '../../shared.ts'
 import { adoptPetStyles } from './pet-styles.ts'
 import {
-  calloutAnchorX,
-  calloutMaxHeight,
+  calloutLiveStyle,
   clampPetPosition,
   completedFromLive,
   completedRows,
@@ -667,11 +666,14 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
   livePos.current = pos
 
   // Keep the bubble on-screen and always ABOVE the pet (never flip it below).
-  const calloutCenterX = calloutAnchorX(pos.x, size, viewport().w)
-  const calloutAbove = true
-  const calloutTop = calloutAbove ? pos.y - 12 : pos.y + petHeight + 12
-  const calloutBottom = viewport().h - pos.y + 12
-  const calloutHeight = calloutMaxHeight(pos.y)
+  const calloutStyle = calloutLiveStyle({
+    petX: pos.x,
+    petY: pos.y,
+    petWidth: size,
+    viewportWidth: viewport().w,
+    viewportHeight: viewport().h,
+    inShell,
+  })
 
   useEffect(() => {
     if (settings.petX === -1 || settings.petY === -1) setDragPos(null)
@@ -756,14 +758,18 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
     const callout = calloutRef.current
     if (callout !== null) {
       const { w, h } = viewport()
-      callout.style.left = `${calloutAnchorX(next.x, size, w)}px`
-      if (inShell) {
-        callout.style.top = 'auto'
-        callout.style.bottom = `${h - next.y + 12}px`
-        callout.style.maxHeight = `${calloutMaxHeight(next.y)}px`
-      } else {
-        callout.style.top = `${next.y - 12}px`
-      }
+      const style = calloutLiveStyle({
+        petX: next.x,
+        petY: next.y,
+        petWidth: size,
+        viewportWidth: w,
+        viewportHeight: h,
+        inShell,
+      })
+      callout.style.left = style.left
+      callout.style.top = style.top
+      callout.style.bottom = style.bottom
+      callout.style.maxHeight = style.maxHeight
     }
   }
 
@@ -957,12 +963,9 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
         className="dsd-pet__callout"
         data-kind={kind}
         data-cards={apCards.length > 0 ? 'true' : undefined}
-        data-below={calloutAbove ? undefined : 'true'}
-        data-anchor={calloutAbove ? 'above' : undefined}
+        data-anchor="above"
         data-celebrating={celebrating ? 'true' : undefined}
-        style={calloutAbove
-          ? { left: calloutCenterX, bottom: calloutBottom, top: 'auto', maxHeight: calloutHeight }
-          : { left: calloutCenterX, top: calloutTop }}
+        style={calloutStyle}
         onPointerEnter={() => { syncDesktopIgnore(true) }}
         onPointerLeave={() => { syncDesktopIgnore(false) }}
       >

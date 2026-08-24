@@ -4,6 +4,7 @@ import {
   aggregatePetKind,
   petKindFromLive,
   calloutAnchorX,
+  calloutLiveStyle,
   calloutMaxHeight,
   clampPetInBounds,
   clampPetPosition,
@@ -264,6 +265,37 @@ describe('calloutAnchorX', () => {
     expect(calloutAnchorX(0, 48, 800)).toBeGreaterThanOrEqual(12)
     expect(calloutAnchorX(0, 48, 800)).toBeLessThan(80)
     expect(calloutAnchorX(752, 48, 800)).toBeLessThanOrEqual(788)
+  })
+})
+
+describe('calloutLiveStyle', () => {
+  it('does not pin top and bottom together when dragging in the browser', () => {
+    const style = calloutLiveStyle({
+      petX: 100,
+      petY: 400,
+      petWidth: 160,
+      viewportWidth: 800,
+      viewportHeight: 600,
+      inShell: false,
+    })
+    expect(style.top).toBe('auto')
+    expect(style.bottom).toBe(`${600 - 400 + 12}px`)
+    expect(style.left).toBe(`${calloutAnchorX(100, 160, 800)}px`)
+    expect(style.maxHeight).toBe(`${calloutMaxHeight(400)}px`)
+  })
+
+  it('keeps the desktop-shell bubble on bottom so it stays above the sprite', () => {
+    const style = calloutLiveStyle({
+      petX: 80,
+      petY: 392,
+      petWidth: 200,
+      viewportWidth: 420,
+      viewportHeight: 640,
+      inShell: true,
+    })
+    expect(style.top).toBe('auto')
+    expect(style.bottom).toBe(`${640 - 392 + 12}px`)
+    expect(style.maxHeight).toBe(`${calloutMaxHeight(392)}px`)
   })
 })
 

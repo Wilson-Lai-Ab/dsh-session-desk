@@ -439,6 +439,27 @@ export function calloutAnchorX(petX: number, petWidth: number, viewportWidth: nu
   return Math.min(max, Math.max(min, center))
 }
 
+/**
+ * Live bubble placement while the pet moves. Always pin with `bottom` (and
+ * `top: auto`) so a drag cannot leave both edges set — CSS then squeezes
+ * the bubble into the leftover gap ("挤到一起").
+ */
+export function calloutLiveStyle(input: {
+  petX: number
+  petY: number
+  petWidth: number
+  viewportWidth: number
+  viewportHeight: number
+  inShell: boolean
+}): { left: string; top: string; bottom: string; maxHeight: string } {
+  return {
+    left: `${calloutAnchorX(input.petX, input.petWidth, input.viewportWidth)}px`,
+    top: 'auto',
+    bottom: `${input.viewportHeight - input.petY + 12}px`,
+    maxHeight: `${calloutMaxHeight(input.petY)}px`,
+  }
+}
+
 /** Pixel left/top for the default bottom-right rest pose. */
 export function defaultPetPosition(
   viewportWidth: number,
