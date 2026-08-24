@@ -315,6 +315,28 @@ describe('default whale', () => {
   })
 })
 
+describe('runningRowLabel', () => {
+  it('appends a single percent after the activity, without a progress bar', async () => {
+    const { runningRowLabel } = await import('../src/client/pet/status.ts')
+    expect(runningRowLabel('物流轨迹开发', '开发中', 42.4)).toBe('物流轨迹开发 · 开发中 42%')
+    expect(runningRowLabel('物流轨迹开发', '开发中')).toBe('物流轨迹开发 · 开发中')
+  })
+})
+
+describe('progressBySession', () => {
+  it('indexes live card percents by session id', async () => {
+    const { progressBySession } = await import('../src/client/pet/status.ts')
+    const map = progressBySession([
+      { id: 's1', view: { progress: 42.4 } },
+      { id: 's2', view: { progress: 8 } },
+      { view: { progress: 9 } },
+    ])
+    expect(map.get('s1')).toBe(42.4)
+    expect(map.get('s2')).toBe(8)
+    expect(map.size).toBe(2)
+  })
+})
+
 describe('activityOf', () => {
   it('maps openState streaming / generating / running to a short activity', () => {
     expect(activityOf({ openState: 'streaming' })).toBe('streaming')

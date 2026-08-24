@@ -131,6 +131,28 @@ export interface FoldedPetRow {
 
 export type PetActivity = 'streaming' | 'generating' | 'running'
 
+/** Compact list line: `title · activity 42%`. Omit the percent when unknown. */
+export function runningRowLabel(title: string, activity: string, progress?: number): string {
+  const head = activity === '' ? title : `${title} · ${activity}`
+  if (typeof progress !== 'number' || !Number.isFinite(progress)) return head
+  return `${head} ${Math.round(Math.min(100, Math.max(0, progress)))}%`
+}
+
+/** Index live answer-pet percents by session id. */
+export function progressBySession(
+  cards: readonly { id?: string; view?: { progress?: number } }[] | undefined,
+): Map<string, number> {
+  const map = new Map<string, number>()
+  if (!cards) return map
+  for (const card of cards) {
+    if (typeof card.id !== 'string' || card.id === '') continue
+    const progress = card.view?.progress
+    if (typeof progress !== 'number' || !Number.isFinite(progress)) continue
+    map.set(card.id, progress)
+  }
+  return map
+}
+
 /** Map a row's `openState` to a short activity label key; `running` is the fallback. */
 export function activityOf(row: PetSessionRow | undefined): PetActivity {
   const key = (row?.openState ?? '').trim().toLowerCase()

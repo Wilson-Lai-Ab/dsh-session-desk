@@ -56,8 +56,26 @@ describe('stream progress', () => {
     s = applyEvent(s, ev('step/start', { turn: 1, step: 0 }), t0)
     s = applyEvent(s, ev('request/header', { header: {}, config: { maxTokens: 1000 } }), t0)
     s = applyEvent(s, ev('assistant/chunk', { turn: 1, step: 0, chunk: { type: 'text-delta', index: 0, text: 'x'.repeat(1000) } }), t0)
-    // est = 250/1000 = 25% → 10+80*0.25 = 30
-    expect(computeProgress(s, t0)).toBe(30)
+    // est = 250/1000 = 25% of a 10–97 stream span → 10 + 87 * 0.25 = 31.75
+    expect(computeProgress(s, t0)).toBeCloseTo(31.75, 5)
+  })
+
+  it('does not race to 90 after a short-to-medium stream', () => {
+    let s = startTurn({ turn: 1 }, t0)
+    s = applyEvent(s, ev('assistant/chunk', { turn: 1, step: 0, chunk: { type: 'text-delta', index: 0, text: 'x'.repeat(1600) } }), t0)
+    const p = computeProgress(s, t0)
+    expect(p).toBeGreaterThan(10)
+    expect(p).toBeLessThan(50)
+  })
+
+  it('can pass 90 on a long stream but stays below 100 until the turn ends', () => {
+    let s = startTurn({ turn: 1 }, t0)
+    s = applyEvent(s, ev('assistant/chunk', { turn: 1, step: 0, chunk: { type: 'text-delta', index: 0, text: 'x'.repeat(40_000) } }), t0)
+    const p = computeProgress(s, t0)
+    expect(p).toBeGreaterThan(90)
+    expect(p).toBeLessThan(100)
+    s = applyEvent(s, ev('turn/end', { turn: 1, reason: { kind: 'completed' } }), t0 + 10)
+    expect(computeProgress(s, t0 + 10)).toBe(100)
   })
 
   it('usage event provides authoritative tokens incl. cache reads/writes', () => {
@@ -84,9 +102,22 @@ describe('tool progress', () => {
     expect(s.phase).toBe('tool')
     expect(s.toolName).toBe('bash')
     const during = computeProgress(s, t0 + 5000)
-    expect(during).toBe(before)
+    expect(during).toBeGreaterThanOrEqual(before)
+    expect(during).toBeLessThan(100)
+    expect(computeProgress(s, t0 + 120_000)).toBeGreaterThan(during)
+    expect(computeProgress(s, t0 + 120_000)).toBeLessThan(100)
     s = applyEvent(s, ev('tool/result', { turn: 1, step: 0, callId: 'c1', message: {} }), t0 + 6000)
     expect(s.phase).toBe('stream')
+  })
+
+  it('does not double-count when the same tool tick is recomputed', () => {
+    let s = startTurn({ turn: 1 }, t0)
+    s = applyEvent(s, ev('assistant/chunk', { turn: 1, step: 0, chunk: { type: 'text-delta', index: 0, text: 'x'.repeat(400) } }), t0)
+    computeProgress(s, t0)
+    s = applyEvent(s, ev('tool/call', { turn: 1, step: 0, callId: 'c1', name: 'bash', arguments: '{}' }), t0)
+    const once = computeProgress(s, t0 + 30_000)
+    const twice = computeProgress(s, t0 + 30_000)
+    expect(twice).toBe(once)
   })
 })
 

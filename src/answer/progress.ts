@@ -11,9 +11,10 @@
  * Progress model (hybrid): phase weights + token fill.
  * - Authoritative tokens come from assistant/chunk `usage`; during streaming we
  *   estimate by text length / 4 (mixed zh/en heuristic).
- * - With maxTokens: out/max linear fill (10%→90%). Without: saturating curve
- *   1-exp(-out/600) so progress never stalls.
- * - Monotone non-decreasing within a turn; tool freezes current progress.
+ * - With maxTokens: out/max linear fill (10%→97%). Without: saturating curve
+ *   1-exp(-out/1800) so a short stream does not race to 90.
+ * - Stream/tool may pass 90 but stay below 100; only turn/end is 100.
+ * - Monotone non-decreasing within a turn; tool slowly creeps instead of freezing.
  * - done = 100, error/idle = 0.
  */
 export const PHASES = {
@@ -47,6 +48,8 @@ export interface ProgressState {
   chunkCount: number
   toolName: string | null
   toolCount: number
+  toolStartedAt: number | null
+  toolProgressBase: number | null
   startedAt: number | null
   firstChunkAt: number | null
   endedAt: number | null
@@ -71,6 +74,8 @@ export function initialProgressState(): ProgressState {
     chunkCount: 0,
     toolName: null,
     toolCount: 0,
+    toolStartedAt: null,
+    toolProgressBase: null,
     startedAt: null,
     firstChunkAt: null,
     endedAt: null,
@@ -153,11 +158,15 @@ export function applyEvent(state: ProgressState, event: { type?: string; data?: 
       state.phase = PHASES.TOOL
       state.toolName = typeof data.name === 'string' ? data.name : state.toolName
       state.toolCount += 1
+      state.toolStartedAt = now
+      state.toolProgressBase = null
       break
     }
     case 'tool/result': {
       if (state.phase === PHASES.TOOL) state.phase = PHASES.STREAM
       state.toolName = null
+      state.toolStartedAt = null
+      state.toolProgressBase = null
       break
     }
     case 'step/end': {
@@ -179,9 +188,18 @@ export function applyEvent(state: ProgressState, event: { type?: string; data?: 
   return state
 }
 
+/** Stream fill starts after think's 10% cap and may pass 90, but never 100. */
+const STREAM_FLOOR = 10
+const STREAM_CEIL = 97
+const STREAM_SPAN = STREAM_CEIL - STREAM_FLOOR
+/** Tokens to ~63% of the stream span; larger = slower 1→90. */
+const STREAM_TAU_TOKENS = 1800
+/** Seconds to close ~63% of the remaining gap while a tool is running. */
+const TOOL_TAU_SECONDS = 90
+
 /**
  * Compute the progress percentage (0–100) and write it back. Monotone
- * non-decreasing within a turn (tool freezes; done=100, error/idle=0).
+ * non-decreasing within a turn (tool creeps toward 97; done=100, error/idle=0).
  */
 export function computeProgress(state: ProgressState, now = Date.now()): number {
   if (state.phase === PHASES.DONE) {
@@ -207,13 +225,18 @@ export function computeProgress(state: ProgressState, now = Date.now()): number 
       const max = state.maxTokens
       const fill = max !== null && max > 0
         ? Math.min(1, out / max)
-        : 1 - Math.exp(-out / 600)
-      target = 10 + 80 * fill
+        : 1 - Math.exp(-out / STREAM_TAU_TOKENS)
+      target = STREAM_FLOOR + STREAM_SPAN * fill
       break
     }
-    case PHASES.TOOL:
-      target = state.progress
+    case PHASES.TOOL: {
+      if (state.toolProgressBase === null) state.toolProgressBase = state.progress
+      const base = state.toolProgressBase
+      const dt = state.toolStartedAt !== null ? Math.max(0, now - state.toolStartedAt) / 1000 : 0
+      const remaining = Math.max(0, STREAM_CEIL - base)
+      target = base + remaining * (1 - Math.exp(-dt / TOOL_TAU_SECONDS))
       break
+    }
     default:
       target = 0
   }

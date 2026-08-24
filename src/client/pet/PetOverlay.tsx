@@ -20,7 +20,9 @@ import {
   IDLE_BROADCAST_HOLD_MS,
   nextIdleBroadcastDelay,
   petKindFromLive,
+  progressBySession,
   resolvePetImage,
+  runningRowLabel,
   subagentDetailRows,
   type FoldedPetRow,
   type PetKind,
@@ -170,6 +172,7 @@ function bubbleRows(
   entries: readonly FoldedPetRow[],
   subagentDetail: readonly FoldedPetRow[],
   t: PetOverlayProps['t'],
+  progress?: ReadonlyMap<string, number>,
 ): BubbleRow[] {
   if (kind === 'subagent') {
     return subagentDetail.map(e => ({ id: e.id, text: e.title }))
@@ -179,7 +182,11 @@ function bubbleRows(
       .filter(e => e.kind === 'running' || e.kind === 'subagent')
       .map(e => ({
         id: e.id,
-        text: `${e.title} · ${t?.(`pet.activity.${e.activity ?? 'running'}`) ?? ''}`,
+        text: runningRowLabel(
+          e.title,
+          t?.(`pet.activity.${e.activity ?? 'running'}`) ?? '',
+          progress?.get(e.id),
+        ),
       }))
   }
   if (kind === 'awaiting') {
@@ -606,6 +613,7 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
   // Main sessions that are working (streaming) or orchestrating subagents.
   const runningRows = entries.filter(e => e.kind === 'running' || e.kind === 'subagent')
   const awaitingRows = entries.filter(e => e.kind === 'awaiting')
+  const liveProgress = useMemo(() => progressBySession(apCards), [apCards])
   const subagentDetail = useStableFoldedRows(useMemo(() => subagentDetailRows(snapshot), [snapshot]))
   // Subagent list is collapsed to a summary row by default; click to expand.
   const [subagentOpen, setSubagentOpen] = useState(false)
@@ -1023,8 +1031,11 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
               <>
                 <span className="dsd-pet__callout__head">{bubbleText('running', Math.max(runningRows.length, apCards.length), props.t)}</span>
                 {(runningRows.length > 0
-                  ? bubbleRows('running', entries, subagentDetail, props.t)
-                  : apCards.map(card => ({ id: card.id, text: card.title || card.id }))
+                  ? bubbleRows('running', entries, subagentDetail, props.t, liveProgress)
+                  : apCards.map(card => ({
+                    id: card.id,
+                    text: runningRowLabel(card.title || card.id, '', card.view?.progress),
+                  }))
                 ).map(row => (
                   <button
                     key={row.id}
