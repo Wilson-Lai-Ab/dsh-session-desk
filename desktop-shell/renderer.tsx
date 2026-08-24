@@ -90,13 +90,12 @@ function useScope<T>(select: (s: { value?: Partial<SessionDeskSettings> }) => T)
   return select(snap)
 }
 
-const update: PetOverlayProps['update'] = (patch) => {
-  void fetch(`${PREFIX}/settings`, {
+const update: PetOverlayProps['update'] = async (patch) => {
+  await fetch(`${PREFIX}/settings`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-pet-token': token, 'x-dsh-session-desk': '1' },
     body: JSON.stringify(patch),
   })
-  return Promise.resolve()
 }
 
 const openSession = (id: string): void => {

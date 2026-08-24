@@ -33,7 +33,9 @@ export function desktopShouldIgnoreMouse(input: {
   overHit: boolean
   chromeOpen?: boolean
 }): boolean {
-  return !(input.dragging || input.menuOpen || input.overHit || input.chromeOpen === true)
+  // A speech bubble must not capture the whole 420×640 window — only the
+  // sprite, bubble, or mode menu (overHit / menuOpen) should take clicks.
+  return !(input.dragging || input.menuOpen || input.overHit)
 }
 
 const DESKTOP_CHROME = '.dsd-pet__hit, .dsd-pet__callout, .dsd-pet__mode-menu, .dsd-pet__preparing'
@@ -79,12 +81,12 @@ export function desktopDragPosition(
   return { x: pointerScreenX - offset.x, y: pointerScreenY - offset.y }
 }
 
-/** Never loop webm: one play then freeze, so the decoder is not always on. */
-export function petVideoShouldLoop(_input: { kind: string; isReaction: boolean }): boolean {
-  return false
+/** Loop the current status webm until a different sprite is shown. Click reactions play once. */
+export function petVideoShouldLoop(input: { kind: string; isReaction: boolean }): boolean {
+  return !input.isReaction
 }
 
-/** Idle clips play once then freeze until the next idleTick swap. */
+/** Status and reaction clips both play; looping is decided by petVideoShouldLoop. */
 export function petVideoShouldPlay(_input: { kind: string; isReaction: boolean }): boolean {
   return true
 }

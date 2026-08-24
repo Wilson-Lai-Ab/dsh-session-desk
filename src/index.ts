@@ -10,6 +10,7 @@ import { createPetAssetHandler, createSessionDeskHandler, API_PREFIX, PET_ASSET_
 import { createAnswerPetEngine } from './answer/engine.ts'
 import { createDesktopPetController } from './desktop/lifecycle.ts'
 import { createDesktopPetHandler, PET_DESKTOP_PREFIX } from './desktop/http.ts'
+import { bindPetSettingWriter } from './desktop/settings-write.ts'
 import { resolveSessionsRoot } from './sessions-root.ts'
 import {
   CORNER_RADIUS_LEVELS,
@@ -150,8 +151,7 @@ export function apply(ctx: unknown, config?: { sessionsRoot?: string }): void {
       readSettings = () => ({ ...DEFAULT_SETTINGS, ...get() })
     }
     if (registered !== undefined && typeof registered.update === 'function') {
-      const update = registered.update
-      updatePetSetting = async (patch: Partial<SessionDeskSettings>) => { void update(patch) }
+      updatePetSetting = bindPetSettingWriter(registered.update)
     }
   })
 
@@ -218,7 +218,7 @@ export function apply(ctx: unknown, config?: { sessionsRoot?: string }): void {
             petY: s.petY,
           }
         },
-        updatePetSetting,
+        updatePetSetting: (patch) => updatePetSetting(patch),
         token: petToken,
         state: petState,
         getAnswerPet: () => answerPet?.snapshot(),

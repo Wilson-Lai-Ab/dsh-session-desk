@@ -285,6 +285,8 @@ function PetVideo(props: { src: string; loop: boolean; play: boolean; onEnded?: 
             playsInline
             preload="metadata"
             disablePictureInPicture
+            draggable={false}
+            onDragStart={event => event.preventDefault()}
             crossOrigin="anonymous"
             onLoadedData={() => handleReady(i)}
             onEnded={i === visible && !layer.loop ? () => {
@@ -716,7 +718,6 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
       dragging: dragging.current,
       menuOpen,
       overHit,
-      chromeOpen: bubbleOpen,
     }))
   }
 
@@ -785,6 +786,7 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
   const onPointerDown = (event: React.PointerEvent<HTMLElement>): void => {
     event.preventDefault()
     dragging.current = true
+    petRef.current?.setAttribute('data-dragging', '')
     moved.current = false
     modeHoldFired.current = false
     const start = rest()
@@ -858,6 +860,7 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
   const onPointerUp = (): void => {
     if (!dragging.current) return
     dragging.current = false
+    petRef.current?.removeAttribute('data-dragging')
     if (nativeDrag.current) {
       nativeDrag.current = false
       ;(window as unknown as { petDesktop?: { stopDrag(): void } }).petDesktop?.stopDrag()
@@ -928,11 +931,15 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
         data-ap-phase={apThemeId !== null ? apPhaseOf(kind) : undefined}
         data-ap-click-blink={isAp && apBlink ? 'true' : undefined}
         aria-label={`${props.t?.('pet.title') ?? 'pet'} · ${kindLabel(kind, props.t)}`}
+        draggable={false}
+        onDragStart={event => event.preventDefault()}
         style={{ left: pos.x, top: pos.y, width: size, height: petHeight }}
       >
         <span
           className="dsd-pet__hit"
           aria-hidden="true"
+          draggable={false}
+          onDragStart={event => event.preventDefault()}
           onPointerEnter={() => { syncDesktopIgnore(true) }}
           onPointerLeave={() => { syncDesktopIgnore(false) }}
           onPointerDown={onPointerDown}
@@ -1150,8 +1157,10 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
               setModeMenu(false)
               setDesktopActive(false)
               setDesktopReady(false)
-              void props.update?.({ petDesktop: false })
-              void fetch(`${PET_DESKTOP_PREFIX}/close`, { method: 'POST', headers: CSRF_HEADERS, body: JSON.stringify({ petDesktop: false }) })
+              void (async () => {
+                await props.update?.({ petDesktop: false })
+                await fetch(`${PET_DESKTOP_PREFIX}/close`, { method: 'POST', headers: CSRF_HEADERS, body: JSON.stringify({ petDesktop: false }) })
+              })()
             }}
           >
             {props.t?.('pet.mode.browser') ?? '浏览器'}

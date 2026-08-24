@@ -41,6 +41,7 @@ body:has([aria-modal="true"]) .dsd-pet-layer {
   box-sizing: border-box;
   padding: 0;
   border: 0;
+  appearance: none;
   background: transparent;
   cursor: grab;
   pointer-events: none;
@@ -49,6 +50,7 @@ body:has([aria-modal="true"]) .dsd-pet-layer {
   overflow: visible;
   touch-action: none;
   user-select: none;
+  -webkit-user-drag: none;
   contain: layout;
 }
 .dsd-pet:active {
@@ -94,12 +96,18 @@ body:has([aria-modal="true"]) .dsd-pet-layer {
 .dsd-pet__art img,
 .dsd-pet__art video {
   pointer-events: none;
+  background: transparent;
+  -webkit-user-drag: none;
+  user-drag: none;
 }
 .dsd-pet__art img {
   object-fit: contain;
 }
 .dsd-pet__art video {
   object-fit: contain;
+}
+.dsd-pet[data-dragging] .dsd-pet__art {
+  animation: none;
 }
 .dsd-pet__art img[src$="whale.png"] {
   animation: dsd-pet-float 3.2s ease-in-out infinite;
@@ -110,10 +118,13 @@ body:has([aria-modal="true"]) .dsd-pet-layer {
   width: 100%;
   height: 100%;
   object-fit: contain;
+  background: transparent;
   opacity: 0;
+  visibility: hidden;
 }
 .dsd-pet__layer--on {
   opacity: 1;
+  visibility: visible;
 }
 .dsd-pet__callout {
   position: fixed;

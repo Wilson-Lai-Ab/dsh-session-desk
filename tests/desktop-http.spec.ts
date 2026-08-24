@@ -388,6 +388,28 @@ describe('desktop-pet endpoints', () => {
     expect(updatePetSetting).toHaveBeenCalledWith({ petDesktop: false })
   })
 
+  it('/close with petDesktop:false persists before killing the overlay', async () => {
+    let persistResolved = false
+    let release!: () => void
+    const pending = new Promise<void>(resolve => { release = resolve })
+    const updatePetSetting = vi.fn(async () => {
+      await pending
+      persistResolved = true
+    })
+    const close = vi.fn(() => {
+      expect(persistResolved).toBe(true)
+    })
+    const { handler, controller } = handlerWith({ updatePetSetting })
+    controller.close = close
+    const done = call(handler, 'POST', `${PET_DESKTOP_PREFIX}/close`, { petDesktop: false }, mutationHeaders)
+    await vi.waitFor(() => expect(updatePetSetting).toHaveBeenCalledWith({ petDesktop: false }))
+    expect(close).not.toHaveBeenCalled()
+    release()
+    const r = await done
+    expect(r.status).toBe(200)
+    expect(close).toHaveBeenCalledTimes(1)
+  })
+
   it('/close with petDesktop:true does not persist the mode', async () => {
     const { handler, updatePetSetting } = handlerWith()
     const r = await call(handler, 'POST', `${PET_DESKTOP_PREFIX}/close`, { petDesktop: true }, mutationHeaders)

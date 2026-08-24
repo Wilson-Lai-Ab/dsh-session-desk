@@ -105,10 +105,9 @@ export function createDesktopPetHandler(opts: DesktopPetHandlerOptions) {
       return
     }
     if (path === `${PET_DESKTOP_PREFIX}/close`) {
-      opts.controller.close()
-      // Persist browser mode when the desktop pet is being closed by the 浏览器
-      // selector button (Fix 2): the browser pet's own update is a no-op here.
+      // Persist first: killing the overlay aborts its in-flight /settings POST.
       if (body.petDesktop === false) await opts.updatePetSetting({ petDesktop: false })
+      opts.controller.close()
       writeJson(res, 200, { ok: true, active: false })
       return
     }

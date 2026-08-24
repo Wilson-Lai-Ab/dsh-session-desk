@@ -87,10 +87,15 @@ describe('desktop native drag', () => {
 })
 
 describe('petVideoShouldLoop', () => {
-  it('never loops desktop-costly clips; busy still shows one play then freezes', () => {
-    expect(petVideoShouldLoop({ kind: 'idle', isReaction: false })).toBe(false)
-    expect(petVideoShouldLoop({ kind: 'running', isReaction: false })).toBe(false)
+  it('loops the current status clip until a different sprite is shown', () => {
+    expect(petVideoShouldLoop({ kind: 'idle', isReaction: false })).toBe(true)
+    expect(petVideoShouldLoop({ kind: 'running', isReaction: false })).toBe(true)
+    expect(petVideoShouldLoop({ kind: 'awaiting', isReaction: false })).toBe(true)
+  })
+
+  it('plays a click reaction once then stops so the status clip can return', () => {
     expect(petVideoShouldLoop({ kind: 'running', isReaction: true })).toBe(false)
+    expect(petVideoShouldLoop({ kind: 'idle', isReaction: true })).toBe(false)
   })
 })
 
@@ -118,15 +123,16 @@ describe('desktopShouldIgnoreMouse', () => {
     expect(desktopShouldIgnoreMouse({ dragging: false, menuOpen: false, overHit: true })).toBe(false)
     expect(desktopShouldIgnoreMouse({ dragging: true, menuOpen: false, overHit: false })).toBe(false)
     expect(desktopShouldIgnoreMouse({ dragging: false, menuOpen: true, overHit: false })).toBe(false)
-    expect(desktopShouldIgnoreMouse({ dragging: false, menuOpen: false, overHit: false, chromeOpen: true })).toBe(false)
+    expect(desktopShouldIgnoreMouse({ dragging: false, menuOpen: false, overHit: false, chromeOpen: true })).toBe(true)
+    expect(desktopShouldIgnoreMouse({ dragging: false, menuOpen: false, overHit: true, chromeOpen: true })).toBe(false)
   })
 })
 
-describe('desktop overlay captures an open confirmation bubble', () => {
-  it('passes chromeOpen when the speech bubble is showing', async () => {
+describe('desktop overlay click-through with a speech bubble', () => {
+  it('does not capture the whole window just because a bubble is showing', async () => {
     const { readFileSync } = await import('node:fs')
     const src = readFileSync(new URL('../src/client/pet/PetOverlay.tsx', import.meta.url), 'utf8')
-    expect(src).toMatch(/desktopShouldIgnoreMouse\(\{[\s\S]*chromeOpen:\s*bubbleOpen/)
+    expect(src).not.toMatch(/chromeOpen:\s*bubbleOpen/)
   })
 })
 

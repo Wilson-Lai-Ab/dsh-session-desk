@@ -32,6 +32,7 @@ vi.mock('@deepseek-ai/schemastery', () => {
 import { apply } from '../src/index.ts'
 import { liveSessionDir } from '../src/session-path.ts'
 import { probeSessionForget, probeSessionReload, validateLoopbackHost, ANSWER_PET_PREFIX } from '../src/http.ts'
+import { PET_DESKTOP_PREFIX } from '../src/desktop/http.ts'
 
 interface FakeRes {
   status: number
@@ -426,5 +427,50 @@ describe('session-desk host HTTP', () => {
     } finally {
       cleanup()
     }
+  })
+})
+
+describe('desktop-pet host settings writer', () => {
+  it('POST /close persists after a late settings inject (does not keep the boot no-op)', async () => {
+    const routes: Route[] = []
+    const patches: unknown[] = []
+    let injectCb: ((scope: {
+      settings: { register: () => { get: () => { petDesktop: boolean }; update: (patch: unknown) => void } }
+    }) => void) | undefined
+    const ctx = {
+      webServer: {
+        register: (route: Route) => {
+          routes.push(route)
+          return () => {}
+        },
+      },
+      sessions: {},
+      effect: (fn: () => void | (() => void)) => { fn() },
+      inject: (
+        _deps: string[],
+        callback: (scope: {
+          settings: { register: () => { get: () => { petDesktop: boolean }; update: (patch: unknown) => void } }
+        }) => void,
+      ) => { injectCb = callback },
+    }
+    apply(ctx)
+    const pet = routes.find(route => route.path === PET_DESKTOP_PREFIX)?.handler
+    if (pet === undefined) throw new Error('test setup: pet-desktop was not registered')
+    injectCb?.({
+      settings: {
+        register: () => ({
+          get: () => ({ petDesktop: true }),
+          update: (patch) => { patches.push(patch) },
+        }),
+      },
+    })
+    const res = fakeRes()
+    await pet(req('POST', `${PET_DESKTOP_PREFIX}/close`, {
+      host: '127.0.0.1',
+      'x-dsh-session-desk': '1',
+      'content-type': 'application/json',
+    }, JSON.stringify({ petDesktop: false })), res)
+    expect(res.status).toBe(200)
+    expect(patches).toEqual([{ petDesktop: false }])
   })
 })

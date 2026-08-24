@@ -8,6 +8,7 @@
  */
 import { app, BrowserWindow, ipcMain, screen } from 'electron'
 import { fileURLToPath } from 'node:url'
+import { clampDesktopWindowPosition } from './window-position.mjs'
 
 function parseArgs(argv) {
   let base = ''
@@ -46,7 +47,15 @@ function applyPosition(nx, ny) {
 function tickDrag() {
   if (!win || dragOffset === null) return
   const cursor = screen.getCursorScreenPoint()
-  applyPosition(Math.round(cursor.x - dragOffset.x), Math.round(cursor.y - dragOffset.y))
+  const { workArea } = screen.getDisplayNearestPoint(cursor)
+  const next = clampDesktopWindowPosition(
+    cursor.x - dragOffset.x,
+    cursor.y - dragOffset.y,
+    WIN_W,
+    WIN_H,
+    workArea,
+  )
+  applyPosition(next.x, next.y)
 }
 
 app.whenReady().then(() => {
@@ -60,6 +69,7 @@ app.whenReady().then(() => {
     resizable: false,
     skipTaskbar: true,
     hasShadow: false,
+    enableLargerThanScreen: true,
     width: WIN_W,
     height: WIN_H,
     x: workArea.x + workArea.width - WIN_W - 12,

@@ -79,6 +79,13 @@ describe('pet overlay hit-testing', () => {
     expect(cssText).toMatch(/\.dsd-pet__hit \{[\s\S]*?height:\s*72%/)
     expect(cssText).not.toContain('.dsd-pet[data-hover] .dsd-pet__art video')
   })
+
+  it('keeps webm alpha while dragging in the browser (no white video card)', () => {
+    expect(cssText).toMatch(/\.dsd-pet__art video[\s\S]{0,220}-webkit-user-drag:\s*none/)
+    expect(cssText).toMatch(/\.dsd-pet__art video[\s\S]{0,220}background:\s*transparent/)
+    expect(cssText).toMatch(/\.dsd-pet\[data-dragging\] \.dsd-pet__art[\s\S]{0,180}animation:\s*none/)
+    expect(cssText).toMatch(/\.dsd-pet__layer \{[\s\S]{0,220}visibility:\s*hidden/)
+  })
 })
 
 describe('cachedThemeOrNull', () => {
@@ -112,6 +119,7 @@ describe('desktop shell window', () => {
     expect(src).toContain('if (lastX === nx && lastY === ny) return')
     expect(src).toContain('win.webContents.setFrameRate(1)')
     expect(src).toContain("ipcMain.on('start-drag'")
+    expect(src).toContain('enableLargerThanScreen: true')
     expect(src).toContain("ipcMain.on('set-paint-active'")
     expect(src).toContain('setFrameRate(paintActive || dragOffset !== null ? 15 : 1)')
     expect(src).toContain('screen.getCursorScreenPoint()')

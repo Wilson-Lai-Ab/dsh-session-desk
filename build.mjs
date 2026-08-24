@@ -15,6 +15,7 @@ cpSync('src/client/pet/assets', 'lib/assets/pet', { recursive: true })
 rmSync('lib/desktop', { recursive: true, force: true })
 mkdirSync('lib/desktop', { recursive: true })
 cpSync('desktop-shell/main.mjs', 'lib/desktop/main.mjs')
+cpSync('desktop-shell/window-position.mjs', 'lib/desktop/window-position.mjs')
 cpSync('desktop-shell/preload.cjs', 'lib/desktop/preload.cjs')
 cpSync('desktop-shell/renderer.html', 'lib/desktop/renderer.html')
 
