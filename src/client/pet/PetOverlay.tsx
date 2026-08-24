@@ -708,12 +708,13 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
       dragging: dragging.current,
       menuOpen,
       overHit,
+      chromeOpen: bubbleOpen,
     }))
   }
 
   useEffect(() => {
     syncDesktopIgnore()
-  }, [inShell, modeMenu])
+  }, [inShell, modeMenu, bubbleOpen])
 
   useEffect(() => {
     if (!modeMenu) return undefined

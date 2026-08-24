@@ -2,6 +2,7 @@ import { header, routeOf, writeJson, readJsonBody, mutationAllowed, asRecord, va
 import { readFile } from 'node:fs/promises'
 import type { SessionDeskSettings } from '../shared.ts'
 import type { DesktopPetController } from './lifecycle.ts'
+import { isConfirmationTool } from '../client/pet/status.ts'
 
 export const PET_DESKTOP_PREFIX = '/session-desk/pet-desktop'
 
@@ -129,10 +130,33 @@ export function createDesktopPetHandler(opts: DesktopPetHandlerOptions) {
   }
 }
 
+function confirmationToolOf(card: unknown): string | undefined {
+  if (card === null || typeof card !== 'object') return undefined
+  const rec = card as {
+    pendingInteraction?: unknown
+    toolName?: unknown
+    view?: { phase?: unknown; toolName?: unknown }
+  }
+  const pending = typeof rec.pendingInteraction === 'string' ? rec.pendingInteraction.trim() : ''
+  if (pending !== '') return pending
+  const tool = typeof rec.view?.toolName === 'string' ? rec.view.toolName
+    : typeof rec.toolName === 'string' ? rec.toolName
+      : ''
+  const trimmed = tool.trim()
+  return isConfirmationTool(trimmed) ? trimmed : undefined
+}
+
 function desktopSnapshot(opts: DesktopPetHandlerOptions) {
   const answerPet = opts.getAnswerPet?.() ?? { running: [], active: false }
   const titles = titleIndex(answerPet)
   const runningIds = new Set((answerPet.running ?? []).map(card => card.id).filter((id): id is string => typeof id === 'string' && id !== ''))
+  const awaitingById = new Map<string, string>()
+  for (const card of answerPet.running ?? []) {
+    const rec = card as { id?: unknown }
+    if (typeof rec.id !== 'string' || rec.id === '') continue
+    const tool = confirmationToolOf(card)
+    if (tool !== undefined) awaitingById.set(rec.id, tool)
+  }
   const items = listedSessions(opts.sessions).map(row => {
     const projected = projectDesktopSession(row)
     const id = typeof projected.id === 'string' ? projected.id : undefined
@@ -141,6 +165,11 @@ function desktopSnapshot(opts: DesktopPetHandlerOptions) {
     } else if (id !== undefined && typeof projected.title !== 'string') {
       const folded = cachedTitleFromLog(id, row)
       if (folded !== undefined) projected.title = folded
+    }
+    if (id !== undefined && awaitingById.has(id)) {
+      const next = { ...projected, pendingInteraction: projected.pendingInteraction ?? awaitingById.get(id) }
+      delete next.running
+      return next
     }
     if (id !== undefined && runningIds.has(id) && projected.running !== true) {
       return { ...projected, running: true }
@@ -218,11 +247,11 @@ function projectDesktopSession(row: unknown): Record<string, unknown> {
   if (id !== undefined) out.id = id
   if (typeof rec.title === 'string' && rec.title !== '') out.title = rec.title
   if (typeof rec.displayTitle === 'string' && rec.displayTitle !== '') out.displayTitle = rec.displayTitle
-  if (typeof rec.openState === 'string') out.openState = rec.openState
+  const openState = rec.openState ?? header?.openState
+  if (typeof openState === 'string' && openState !== '') out.openState = openState
   if (rec.running === true) out.running = true
-  if (typeof rec.pendingInteraction === 'string' && rec.pendingInteraction !== '') {
-    out.pendingInteraction = rec.pendingInteraction
-  }
+  const pending = rec.pendingInteraction ?? header?.pendingInteraction
+  if (typeof pending === 'string' && pending !== '') out.pendingInteraction = pending
   if (rec.error === true || typeof rec.error === 'string') out.error = rec.error
   if (rec.failed === true) out.failed = true
   const origin = rec.origin ?? header?.origin

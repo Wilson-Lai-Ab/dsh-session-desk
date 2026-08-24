@@ -78,6 +78,14 @@ describe('sessionKindFromRow', () => {
     expect(sessionKindFromRow({ title: '请确认' })).toBe('idle')
   })
 
+  it('keeps awaiting when a live card is also marked running', () => {
+    expect(sessionKindFromRow({
+      pendingInteraction: 'ask_user_question',
+      running: true,
+      openState: 'streaming',
+    })).toBe('awaiting')
+  })
+
   it('maps running true to running and failed/error flags to error', () => {
     expect(sessionKindFromRow({ running: true })).toBe('running')
     expect(sessionKindFromRow({ error: true })).toBe('error')

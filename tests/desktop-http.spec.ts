@@ -265,6 +265,49 @@ describe('desktop-pet endpoints', () => {
     expect(r.body.answerPet.running).toEqual([{ id: 's1', title: 'chat' }])
   })
 
+  it('GET /snapshot marks a confirmation tool as awaiting, not merely running', async () => {
+    const sessions = {
+      list: () => [{ id: 's1', title: 'chat' }],
+    }
+    const { handler } = handlerWith({
+      sessions,
+      getAnswerPet: () => ({
+        running: [{
+          id: 's1',
+          title: 'chat',
+          view: { phase: 'tool', toolName: 'ask_user_question' },
+          pendingInteraction: 'ask_user_question',
+        }],
+        active: true,
+      }),
+    })
+    const r = await call(handler, 'GET', `${PET_DESKTOP_PREFIX}/snapshot?token=tok`)
+    expect(r.status).toBe(200)
+    expect(r.body.sessions.items).toEqual([
+      { id: 's1', title: 'chat', pendingInteraction: 'ask_user_question' },
+    ])
+    expect(r.body.sessions.items[0].running).toBeUndefined()
+  })
+
+  it('GET /snapshot keeps pendingInteraction from the host session row', async () => {
+    const sessions = {
+      list: () => [{
+        id: 's1',
+        title: 'chat',
+        header: { pendingInteraction: 'exit_plan_mode' },
+        running: true,
+      }],
+    }
+    const { handler } = handlerWith({ sessions })
+    const r = await call(handler, 'GET', `${PET_DESKTOP_PREFIX}/snapshot?token=tok`)
+    expect(r.body.sessions.items[0]).toEqual({
+      id: 's1',
+      title: 'chat',
+      running: true,
+      pendingInteraction: 'exit_plan_mode',
+    })
+  })
+
   it('GET /events streams a snapshot and unsubscribes when the client closes', async () => {
     const unsub = vi.fn()
     const subscribeEdges = vi.fn(() => unsub)

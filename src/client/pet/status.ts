@@ -52,12 +52,22 @@ export interface PetSessionRow {
  * Kind for a list row. `openState` wins when present; otherwise list flags.
  * Title / chat text is never inspected.
  */
+/** Tools that pause the turn until the user answers (desktop + browser pets). */
+export function isConfirmationTool(name: string | undefined): boolean {
+  const key = (name ?? '').trim().toLowerCase()
+  if (key === '') return false
+  return key === 'ask_user_question' || key === 'exit_plan_mode'
+    || key.includes('ask_user') || key.includes('permission')
+}
+
 export function sessionKindFromRow(row: PetSessionRow | undefined): PetKind {
   if (!row) return 'idle'
+  // pendingInteraction is the host's "waiting on the user" flag; it beats a
+  // stale streaming openState that desktop snapshots still carry.
+  if (toolOf(row)) return 'awaiting'
   if (typeof row.openState === 'string' && row.openState.trim() !== '') {
     return petKindOf(row.openState)
   }
-  if (row.pendingInteraction) return 'awaiting'
   if (row.error === true || row.failed === true) return 'error'
   if (typeof row.error === 'string' && row.error.trim() !== '') return 'error'
   if (row.running === true) return 'running'

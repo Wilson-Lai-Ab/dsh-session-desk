@@ -122,6 +122,14 @@ describe('desktopShouldIgnoreMouse', () => {
   })
 })
 
+describe('desktop overlay captures an open confirmation bubble', () => {
+  it('passes chromeOpen when the speech bubble is showing', async () => {
+    const { readFileSync } = await import('node:fs')
+    const src = readFileSync(new URL('../src/client/pet/PetOverlay.tsx', import.meta.url), 'utf8')
+    expect(src).toMatch(/desktopShouldIgnoreMouse\(\{[\s\S]*chromeOpen:\s*bubbleOpen/)
+  })
+})
+
 describe('desktopPointerOverChrome', () => {
   it('captures the fish and bubble, not empty glass', () => {
     const hit = { closest: (sel: string) => sel.includes('.dsd-pet__hit') ? hit : null }
