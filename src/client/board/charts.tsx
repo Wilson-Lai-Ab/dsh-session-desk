@@ -16,6 +16,7 @@ const SEGMENT_COLOR: Record<TokenSegmentKey, string> = {
 
 function fmtMs(ms: number): string {
   const s = ms / 1e3
+  if (s < 1) return `${Math.round(s * 100) / 100}s`
   if (s < 60) return `${Math.round(s * 10) / 10}s`
   const whole = Math.round(s)
   return `${Math.floor(whole / 60)}m${whole % 60}s`
@@ -101,6 +102,40 @@ export function TurnTimingChart({ points }: { points: readonly TurnTimingPoint[]
         )
       })}
     </div>
+  )
+}
+
+export interface PhaseSegment {
+  key: string
+  label: string
+  ms: number
+  color: string
+}
+
+/** Stacked phase bar. Segments with no duration are omitted; never 0-fills. */
+export function PhaseBar({ segments }: { segments: readonly PhaseSegment[] }): ReactNode {
+  const present = segments.filter(s => s.ms > 0)
+  if (present.length === 0) return null
+  return (
+    <>
+      <div className="dsd-chart__phase" role="img" aria-label="phase mix">
+        {present.map(s => (
+          <div
+            key={s.key}
+            className="dsd-chart__phase-seg"
+            style={{ flexGrow: s.ms, background: s.color }}
+            title={`${s.label} ${fmtMs(s.ms)}`}
+          />
+        ))}
+      </div>
+      <div className="dsd-chart__legend">
+        {present.map(s => (
+          <span key={s.key} className="dsd-chart__legend-item">
+            <i style={{ background: s.color }} />{s.label} {fmtMs(s.ms)}
+          </span>
+        ))}
+      </div>
+    </>
   )
 }
 

@@ -1,15 +1,16 @@
 /**
  * Conversation-header 看板 tab: model-call timings, turn/session stats,
  * tokens and tool-call classification. Workspace mode sums list projections.
+ * Turn mode folds one engine turn into phase + per-tool totals.
  */
-import { useMemo, useState, type ReactNode } from 'react'
-import { collectToolStats, type ToolBucket } from '../../board/classify.ts'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { BUCKET_ORDER, classifyTool, collectToolStats, type ToolBucket, type ToolBucketRow } from '../../board/classify.ts'
 import {
   aggregateModelCalls,
   collectModelSamples,
-  type ModelCallSample,
   type ModelStatsRow,
 } from '../../board/model-stats.ts'
+import { indexTurnSummaries, type TurnSummary, type TurnToolRow } from '../../board/turn-summary.ts'
 import {
   readTokenUsage,
   sumSessionStats,
@@ -18,10 +19,11 @@ import {
   type TokenUsage,
   type WorkspacePeer,
 } from '../../board/workspace-stats.ts'
+import { MAX_STRIP_TURNS } from '../../history/turns.ts'
 import { adoptBoardStyles } from './board-styles.ts'
-import { ModelBars, PerTurnCallsChart, TokenDonut, TurnTimingChart } from './charts.tsx'
+import { ModelBars, PerTurnCallsChart, PhaseBar, TokenDonut, TurnTimingChart } from './charts.tsx'
 
-type BoardMode = 'session' | 'workspace'
+type BoardMode = 'session' | 'workspace' | 'turn'
 
 interface ProjectionValues {
   sessionStats?: SessionStats
@@ -69,9 +71,17 @@ function asNumber(value: unknown): number | undefined {
 function formatDuration(ms: number | undefined): string {
   if (ms === undefined) return '—'
   const s = ms / 1e3
+  if (s < 1) return `${Math.round(s * 100) / 100}s`
   if (s < 60) return `${Math.round(s * 10) / 10}s`
   const whole = Math.round(s)
   return `${Math.floor(whole / 60)}m${whole % 60}s`
+}
+
+function toolNameLabel(name: string, t: BoardViewProps['t']): string {
+  const key = `board.toolName.${name}`
+  const mapped = t?.(key)
+  if (mapped !== undefined && mapped !== key) return mapped
+  return t?.(`board.bucket.${classifyTool(name)}`) ?? name
 }
 
 function formatTokens(n: number | undefined): string {
@@ -153,9 +163,130 @@ function Section(props: { title: string; children: ReactNode }): ReactNode {
   )
 }
 
+function bucketsFromTools(tools: readonly TurnToolRow[]): ToolBucketRow[] {
+  const totals = new Map<ToolBucket, { count: number; totalMs: number; timed: boolean }>()
+  for (const tool of tools) {
+    const bucket = classifyTool(tool.name)
+    const row = totals.get(bucket) ?? { count: 0, totalMs: 0, timed: false }
+    row.count += tool.count
+    if (tool.totalMs !== undefined) {
+      row.totalMs += tool.totalMs
+      row.timed = true
+    }
+    totals.set(bucket, row)
+  }
+  const rows: ToolBucketRow[] = []
+  for (const bucket of BUCKET_ORDER) {
+    const row = totals.get(bucket)
+    if (row === undefined) continue
+    rows.push(row.timed ? { bucket, count: row.count, totalMs: row.totalMs } : { bucket, count: row.count })
+  }
+  return rows
+}
+
+function TurnStrip(props: {
+  turns: readonly number[]
+  questions: ReadonlyMap<number, string>
+  selected: number | undefined
+  onSelect: (turn: number) => void
+  t?: BoardViewProps['t']
+}): ReactNode {
+  const selectedRef = useRef<HTMLButtonElement | null>(null)
+  useEffect(() => {
+    selectedRef.current?.scrollIntoView({ inline: 'nearest', block: 'nearest' })
+  }, [props.selected, props.turns])
+  if (props.turns.length === 0) return <Empty t={props.t} />
+  const question = (props.selected === undefined ? undefined : props.questions.get(props.selected))
+    || (props.t?.('history.noText') ?? '')
+  return (
+    <div className="dsd-board__map">
+      <div className="dsd-board__map-strip" role="listbox" aria-label={props.t?.('board.pickTurn') ?? '选择回合'}>
+        {props.turns.map(turn => {
+          const preview = props.questions.get(turn)
+          const selected = turn === props.selected
+          return (
+            <button
+              key={turn}
+              ref={selected ? selectedRef : undefined}
+              type="button"
+              className="dsd-board__map-btn"
+              role="option"
+              aria-selected={selected}
+              title={preview || `T${turn}`}
+              onClick={() => props.onSelect(turn)}
+            >
+              <span className="dsd-board__dash" />
+            </button>
+          )
+        })}
+      </div>
+      <div className="dsd-board__map-caption">
+        {props.selected === undefined
+          ? (props.t?.('board.noTurn') ?? '暂无回合')
+          : `T${props.selected} · ${question}`}
+      </div>
+    </div>
+  )
+}
+
+function TurnPanel(props: {
+  summary: TurnSummary | undefined
+  turns: readonly number[]
+  questions: ReadonlyMap<number, string>
+  selected: number | undefined
+  onSelect: (turn: number) => void
+  t?: BoardViewProps['t']
+}): ReactNode {
+  const t = props.t
+  const row = props.summary
+  const buckets = row === undefined ? [] : bucketsFromTools(row.tools)
+  const bucketLabel = (bucket: ToolBucket): string => t?.(`board.bucket.${bucket}`) ?? bucket
+  const phases = row === undefined ? [] : [
+    row.planMs === undefined ? undefined : { key: 'plan', label: t?.('board.phase.plan') ?? '分析任务', ms: row.planMs, color: 'var(--dsw-alias-info, #0ea5e9)' },
+    row.reasonMs === undefined ? undefined : { key: 'reason', label: t?.('board.phase.reason') ?? '推理与规划', ms: row.reasonMs, color: 'var(--dsw-alias-warning, #f59e0b)' },
+    row.toolMs === undefined ? undefined : { key: 'tool', label: t?.('board.phase.tool') ?? '调用', ms: row.toolMs, color: 'var(--dsw-alias-brand-primary, #4176e6)' },
+    row.answerMs === undefined ? undefined : { key: 'answer', label: t?.('board.phase.answer') ?? '组织回答', ms: row.answerMs, color: 'var(--dsw-alias-brand-secondary, #22c55e)' },
+  ].filter((seg): seg is { key: string; label: string; ms: number; color: string } => seg !== undefined)
+  return (
+    <>
+      <TurnStrip turns={props.turns} questions={props.questions} selected={props.selected} onSelect={props.onSelect} t={t} />
+      {row === undefined ? <Empty t={t} /> : (
+        <>
+          <div className="dsd-board__cards">
+            <StatCard label={t?.('board.wall') ?? '墙钟'} value={formatDuration(row.wallMs)} />
+            <StatCard label={t?.('board.llm') ?? '模型耗时'} value={formatDuration(row.modelMs)} />
+            <StatCard label={t?.('board.tool') ?? '工具耗时'} value={formatDuration(row.toolMs)} />
+            <StatCard label={t?.('board.toolCount') ?? '调用次数'} value={String(row.toolCount)} />
+          </div>
+          <Section title={t?.('board.phase') ?? '阶段耗时'}>
+            {phases.length === 0 ? <Empty t={t} /> : <PhaseBar segments={phases} />}
+          </Section>
+          <Section title={t?.('board.calls') ?? '调用汇总'}>
+            {row.tools.length === 0 ? <Empty t={t} /> : (
+              <ModelBars
+                barBy="duration"
+                rows={row.tools.map(tool => ({ label: toolNameLabel(tool.name, t), count: tool.count, totalMs: tool.totalMs }))}
+              />
+            )}
+          </Section>
+          <Section title={t?.('board.classify') ?? '调用分类'}>
+            {buckets.length === 0 ? <Empty t={t} /> : (
+              <ModelBars
+                barBy="count"
+                rows={buckets.map(item => ({ label: bucketLabel(item.bucket), count: item.count, totalMs: item.totalMs }))}
+              />
+            )}
+          </Section>
+        </>
+      )}
+    </>
+  )
+}
+
 export function BoardView(props: BoardViewProps): ReactNode {
   adoptBoardStyles()
   const [mode, setMode] = useState<BoardMode>('session')
+  const [pickedTurn, setPickedTurn] = useState<number | undefined>(undefined)
   const t = props.t
   const sessionId = props.sessionId ?? ''
   const chat = props.useSession ? props.useSession(s => s.chat) : undefined
@@ -174,15 +305,19 @@ export function BoardView(props: BoardViewProps): ReactNode {
   )
   const sessionStats = liveStats
   const tokenUsage = liveTokens
+  const turnMode = mode === 'turn'
 
-  const samples = useMemo(() => collectModelSamples(chat), [chat])
+  const samples = useMemo(() => (turnMode ? [] : collectModelSamples(chat)), [chat, turnMode])
   const sessionModel = useMemo(
     () => aggregateModelCalls(samples, sessionStats?.llmMs),
     [samples, sessionStats?.llmMs],
   )
-  const workspaceStats = useMemo(() => sumSessionStats(peers), [peers])
-  const workspaceTokens = useMemo(() => sumTokenUsage(peers), [peers])
+  const workspaceStats = useMemo(() => (turnMode ? undefined : sumSessionStats(peers)), [peers, turnMode])
+  const workspaceTokens = useMemo(() => (turnMode ? undefined : sumTokenUsage(peers)), [peers, turnMode])
   const workspaceModel: { all: ModelStatsRow; byModel: ModelStatsRow[]; missing: boolean } = useMemo(() => {
+    if (turnMode) {
+      return { missing: true, byModel: [], all: { label: 'all', count: 0, fallbackSessionTotal: true } }
+    }
     const llm = peers
       .map(row => row.projectionValues?.sessionStats?.llmMs)
       .filter((value): value is number => value !== undefined)
@@ -203,10 +338,28 @@ export function BoardView(props: BoardViewProps): ReactNode {
         fallbackSessionTotal: true,
       },
     }
-  }, [peers])
+  }, [peers, turnMode])
 
-  const turns = useMemo(() => collectTurnTimings(chat, topTimings), [chat, topTimings])
-  const buckets = useMemo(() => collectToolStats(chat), [chat])
+  const turns = useMemo(() => (turnMode ? [] : collectTurnTimings(chat, topTimings)), [chat, topTimings, turnMode])
+  const buckets = useMemo(() => (turnMode ? [] : collectToolStats(chat)), [chat, turnMode])
+  const turnIndex = useMemo(
+    () => (turnMode ? indexTurnSummaries(chat, topTimings) : new Map<number, TurnSummary>()),
+    [chat, topTimings, turnMode],
+  )
+  const stripTurns = useMemo(() => {
+    if (!turnMode) return [] as number[]
+    return [...turnIndex.keys()].sort((a, b) => a - b).slice(-MAX_STRIP_TURNS)
+  }, [turnIndex, turnMode])
+  const stripQuestions = useMemo(() => {
+    const questions = new Map<number, string>()
+    if (!turnMode) return questions
+    for (const [turn, row] of turnIndex) {
+      if (row.question !== undefined && row.question !== '') questions.set(turn, row.question)
+    }
+    return questions
+  }, [turnIndex, turnMode])
+  const newest = stripTurns.length === 0 ? undefined : stripTurns[stripTurns.length - 1]
+  const selectedTurn = pickedTurn !== undefined && stripTurns.includes(pickedTurn) ? pickedTurn : newest
   const workspace = mode === 'workspace'
   const modelRow = workspace ? workspaceModel.all : sessionModel.all
   const modelBy = workspace ? [] : sessionModel.byModel
@@ -227,8 +380,22 @@ export function BoardView(props: BoardViewProps): ReactNode {
         <button type="button" aria-pressed={mode === 'workspace'} onClick={() => setMode('workspace')}>
           {t?.('board.workspace') ?? '本工作区'}
         </button>
+        <button type="button" aria-pressed={mode === 'turn'} onClick={() => setMode('turn')}>
+          {t?.('board.turn') ?? '回合'}
+        </button>
       </div>
 
+      {turnMode ? (
+        <TurnPanel
+          summary={selectedTurn === undefined ? undefined : turnIndex.get(selectedTurn)}
+          turns={stripTurns}
+          questions={stripQuestions}
+          selected={selectedTurn}
+          onSelect={setPickedTurn}
+          t={t}
+        />
+      ) : (
+      <>
       <div className="dsd-board__cards">
         <StatCard
           label={t?.('board.llm') ?? '模型耗时'}
@@ -347,6 +514,8 @@ export function BoardView(props: BoardViewProps): ReactNode {
             </div>
           )}
         </Section>
+      )}
+      </>
       )}
     </div>
   )

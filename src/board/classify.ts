@@ -20,7 +20,7 @@ export interface ToolBucketRow {
   totalMs?: number
 }
 
-const BUCKET_ORDER: readonly ToolBucket[] = [
+export const BUCKET_ORDER: readonly ToolBucket[] = [
   'skill',
   'bash',
   'read',
