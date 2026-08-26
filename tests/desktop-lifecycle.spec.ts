@@ -118,6 +118,17 @@ describe('DesktopPetController background download', () => {
     expect(controller.isActive()).toBe(true)
   })
 
+  it('forwards the browser pet window origin as --x/--y so the overlay does not jump', async () => {
+    const spawn = vi.fn().mockReturnValue({ kill: vi.fn(), on: vi.fn(), unref: vi.fn() })
+    const controller = createDesktopPetController({
+      getExecutable: async () => '/fake/electron',
+      spawn,
+    } as never)
+    await controller.spawn('http://127.0.0.1:3080', 'tok', { x: 340, y: 264 })
+    const args = spawn.mock.calls[0]?.[1] as string[]
+    expect(args).toEqual(expect.arrayContaining(['--x=340', '--y=264']))
+  })
+
   it('spawn kills leftover overlay processes before launching', async () => {
     const killOrphans = vi.fn()
     const spawn = vi.fn().mockReturnValue({ kill: vi.fn(), on: vi.fn(), unref: vi.fn() })

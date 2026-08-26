@@ -46,6 +46,25 @@ export function desktopPointerOverChrome(target: EventTarget | null): boolean {
   return (target as Element).closest(DESKTOP_CHROME) !== null
 }
 
+/**
+ * Screen origin of the compact desktop window so the sprite stays where the
+ * in-page pet is. Browser petX/petY are viewport-relative; rest is where the
+ * sprite sits inside the overlay.
+ */
+export function desktopWindowOriginFromBrowserPet(input: {
+  screenX: number
+  screenY: number
+  petX: number
+  petY: number
+  restX: number
+  restY: number
+}): { x: number; y: number } {
+  return {
+    x: Math.round(input.screenX + input.petX - input.restX),
+    y: Math.round(input.screenY + input.petY - input.restY),
+  }
+}
+
 /** Native window origin + screen-space pointer delta (clientX jumps as the window moves). */
 export function desktopWindowPosition(
   origin: { windowX: number; windowY: number; pointerScreenX: number; pointerScreenY: number },

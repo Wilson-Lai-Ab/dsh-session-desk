@@ -26,6 +26,8 @@ import { PinTurnAction } from './history/PinTurnAction.tsx'
 import { adoptHistoryStyles } from './history/history-styles.ts'
 import { PetOverlay } from './pet/PetOverlay.tsx'
 import { TrashFooter } from './trash/TrashFooter.tsx'
+import { startRowWash } from './workspace/row-wash.ts'
+import { answerPetState } from './api.ts'
 import { NS, en, zh } from './locales.ts'
 
 export const inject = ['slots', 'locale', 'sessions', 'connection', 'remote', 'settingsScope']
@@ -58,7 +60,7 @@ interface ClientContext {
   locale: LocaleFace
   slots: SlotsFace
   sessions?: {
-    list?: () => unknown
+    list?: unknown
     open?: (id: string) => unknown
     create?: (opts: { cwd?: string }) => unknown
     refresh?: () => Promise<void>
@@ -377,4 +379,15 @@ export function apply(ctx: ClientContext): void {
       }),
     }, TrashFooter)))
   }, 'dsh-session-desk: trash footer')
+
+  ctx.effect(() => startRowWash({
+    list: ctx.sessions?.list,
+    fetchCards: async () => {
+      try {
+        return (await answerPetState()).running
+      } catch {
+        return []
+      }
+    },
+  }), 'dsh-session-desk: workspace row wash')
 }

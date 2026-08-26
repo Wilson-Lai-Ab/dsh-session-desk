@@ -6,6 +6,7 @@ import {
   desktopDragOffset,
   desktopDragPosition,
   desktopPointerOverChrome,
+  desktopWindowOriginFromBrowserPet,
   desktopWindowPosition,
   ignoreMouseChanged,
   petVideoShouldLoop,
@@ -68,6 +69,19 @@ describe('classifyPointerEnd', () => {
   it('commits a drag when the pointer moved past slop', () => {
     expect(classifyPointerEnd({ moved: true, holdMenuFired: false })).toBe('drag')
     expect(classifyPointerEnd({ moved: true, holdMenuFired: true })).toBe('drag')
+  })
+})
+
+describe('desktopWindowOriginFromBrowserPet', () => {
+  it('places the desktop window so the sprite matches the in-page pet', () => {
+    expect(desktopWindowOriginFromBrowserPet({
+      screenX: 50,
+      screenY: 80,
+      petX: 400,
+      petY: 500,
+      restX: 110,
+      restY: 316,
+    })).toEqual({ x: 340, y: 264 })
   })
 })
 
@@ -143,6 +157,16 @@ describe('desktopPointerOverChrome', () => {
     expect(desktopPointerOverChrome(hit)).toBe(true)
     expect(desktopPointerOverChrome(glass)).toBe(false)
     expect(desktopPointerOverChrome(null)).toBe(false)
+  })
+})
+
+describe('browser-to-desktop spawn body', () => {
+  it('POSTs the computed window origin instead of an empty spawn body', async () => {
+    const { readFileSync } = await import('node:fs')
+    const src = readFileSync(new URL('../src/client/pet/PetOverlay.tsx', import.meta.url), 'utf8')
+    expect(src).toContain('desktopWindowOriginFromBrowserPet')
+    expect(src).toMatch(/PET_DESKTOP_PREFIX\}\/spawn[\s\S]{0,500}JSON\.stringify\(/)
+    expect(src).not.toMatch(/fetch\(`\$\{PET_DESKTOP_PREFIX\}\/spawn`, \{ method: 'POST', headers: CSRF_HEADERS, body: '\{\}' \}\)/)
   })
 })
 

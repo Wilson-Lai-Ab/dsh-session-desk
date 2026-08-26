@@ -9,8 +9,13 @@ export interface DownloadState {
   error?: string
 }
 
+export interface WindowOrigin {
+  x: number
+  y: number
+}
+
 export interface DesktopPetController {
-  spawn(baseUrl: string, token: string): Promise<void>
+  spawn(baseUrl: string, token: string, origin?: WindowOrigin): Promise<void>
   close(): void
   isActive(): boolean
   isReady(): boolean
@@ -53,14 +58,20 @@ export function createDesktopPetController(deps?: Deps): DesktopPetController {
   // Download Electron (if needed) then launch the desktop shell. Progress
   // advances on a background task; the caller's spawn() resolves when this
   // completes, but the HTTP handler must not await it (it returns 202).
-  async function launch(baseUrl: string, token: string): Promise<void> {
+  function originArgs(origin?: WindowOrigin): string[] {
+    if (origin === undefined) return []
+    if (!Number.isFinite(origin.x) || !Number.isFinite(origin.y)) return []
+    return [`--x=${Math.round(origin.x)}`, `--y=${Math.round(origin.y)}`]
+  }
+
+  async function launch(baseUrl: string, token: string, origin?: WindowOrigin): Promise<void> {
     try {
       stage = 'downloading'
       const exe = await getExecutable()
       stage = 'ready'
       await Promise.resolve(killOrphans())
       const mainJs = fileURLToPath(new URL('./desktop/main.mjs', import.meta.url))
-      const spawned = spawnFn(exe, [mainJs, `--base=${baseUrl}`, `--token=${token}`], { stdio: 'ignore' })
+      const spawned = spawnFn(exe, [mainJs, `--base=${baseUrl}`, `--token=${token}`, ...originArgs(origin)], { stdio: 'ignore' })
       child = spawned
       active = true
       spawned.on('exit', (code, signal) => {
@@ -91,18 +102,18 @@ export function createDesktopPetController(deps?: Deps): DesktopPetController {
     }
   }
 
-  function begin(baseUrl: string, token: string): Promise<void> {
+  function begin(baseUrl: string, token: string, origin?: WindowOrigin): Promise<void> {
     if (active) return Promise.resolve()
     if (pending) return pending
     // Clear `pending` after the launch settles (success OR failure) so a later
     // /spawn (re-mount, HMR, another tab) starts a fresh attempt instead of
     // returning the settled promise.
-    pending = launch(baseUrl, token).finally(() => { pending = null })
+    pending = launch(baseUrl, token, origin).finally(() => { pending = null })
     return pending
   }
 
   return {
-    spawn: (baseUrl: string, token: string): Promise<void> => begin(baseUrl, token),
+    spawn: (baseUrl: string, token: string, origin?: WindowOrigin): Promise<void> => begin(baseUrl, token, origin),
     close(): void {
       const current = child
       child = null

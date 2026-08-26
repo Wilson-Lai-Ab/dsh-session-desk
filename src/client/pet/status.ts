@@ -46,6 +46,8 @@ export interface PetSessionRow {
   parentSessionId?: string
   sessionId?: string
   origin?: 'subagent' | string
+  /** Host "done while not selected" reminder; cleared when the session is opened. */
+  completed?: boolean
 }
 
 /**
@@ -301,6 +303,7 @@ export interface PetCatalogChild {
 }
 
 export interface PetListSnapshot {
+  current?: string
   ids?: string[]
   byId?: Record<string, PetSessionRow>
   items?: PetSessionRow[]

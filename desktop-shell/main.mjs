@@ -8,7 +8,7 @@
  */
 import { app, BrowserWindow, ipcMain, screen } from 'electron'
 import { fileURLToPath } from 'node:url'
-import { clampDesktopWindowPosition } from './window-position.mjs'
+import { clampDesktopWindowPosition, initialDesktopWindowPosition, parseWindowOriginArgs } from './window-position.mjs'
 
 function parseArgs(argv) {
   let base = ''
@@ -59,8 +59,13 @@ function tickDrag() {
 }
 
 app.whenReady().then(() => {
-  const { base, token } = parseArgs(process.argv.slice(2))
-  const { workArea } = screen.getPrimaryDisplay()
+  const argv = process.argv.slice(2)
+  const { base, token } = parseArgs(argv)
+  const origin = parseWindowOriginArgs(argv)
+  const display = origin
+    ? screen.getDisplayNearestPoint(origin)
+    : screen.getPrimaryDisplay()
+  const pos = initialDesktopWindowPosition(origin, WIN_W, WIN_H, display.workArea)
 
   win = new BrowserWindow({
     frame: false,
@@ -72,8 +77,8 @@ app.whenReady().then(() => {
     enableLargerThanScreen: true,
     width: WIN_W,
     height: WIN_H,
-    x: workArea.x + workArea.width - WIN_W - 12,
-    y: workArea.y + workArea.height - WIN_H - 12,
+    x: pos.x,
+    y: pos.y,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,

@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>工作区会话行 · 状态底色完整原型</title>
+  <style>
+    :root {
+      --dsw-alias-label-primary: #0f1115;
+      --dsw-alias-label-secondary: #545557;
+      --dsw-alias-label-tertiary: #81858c;
+      --dsw-alias-bg-base: #ffffff;
+      --dsw-alias-bg-layer-1: #f9fafb;
+      --dsw-alias-bg-layer-2: #f5f5f5;
+      --dsw-alias-border-l2: rgb(0 0 0 / 10%);
+      --dsw-alias-interactive-bg-hover: rgb(15 17 21 / 6%);
+      --dsw-alias-state-business-primary: #4176e6;
+      --dsw-alias-state-warn-primary: #f59e0b;
+      --dsw-alias-state-success-primary: #22c55e;
+      --dsw-alias-state-error-primary: #ef4444;
+      --ds-ease-in-out: cubic-bezier(.4, 0, .2, 1);
+      --sidebar-width: 268px;
+      font-family: Inter, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+    }
+    html[data-theme="dark"] {
+      --dsw-alias-label-primary: #f9fafb;
+      --dsw-alias-label-secondary: #cfd3d6;
+      --dsw-alias-label-tertiary: #adb2b8;
+      --dsw-alias-bg-base: #151517;
+      --dsw-alias-bg-layer-1: #1b1c20;
+      --dsw-alias-bg-layer-2: #222329;
+      --dsw-alias-border-l2: rgb(255 255 255 / 12%);
+      --dsw-alias-interactive-bg-hover: rgb(255 255 255 / 8%);
+      color-scheme: dark;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #e8eaef;
+      color: var(--dsw-alias-label-primary);
+    }
+    html[data-theme="dark"] body { background: #0b0c10; }
+    .page {
+      padding: 28px 32px 48px;
+      max-width: 1480px;
+      margin: 0 auto;
+    }
+    h1 { font-size: 22px; font-weight: 650; margin: 0 0 6px; letter-spacing: -0.02em; }
+    .lede { color: #61666b; font-size: 13px; line-height: 1.55; margin: 0 0 22px; max-width: 820px; }
+    html[data-theme="dark"] .lede { color: #adb2b8; }
+    .legend {
+      display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 22px;
+    }
+    .chip {
+      display: inline-flex; align-items: center; gap: 7px;
+      height: 26px; padding: 0 10px; border-radius: 999px;
+      font-size: 12px; font-weight: 550;
+      border: 1px solid var(--dsw-alias-border-l2);
+      background: #fff;
+    }
+    html[data-theme="dark"] .chip { background: #1b1c20; }
+    .swatch { width: 10px; height: 10px; border-radius: 3px; }
+    .grid {
+      display: grid;
+      grid-template-columns: var(--sidebar-width) var(--sidebar-width) 1fr;
+      gap: 18px;
+      align-items: start;
+    }
+    .col-title {
+      font-size: 12px; font-weight: 650; letter-spacing: .04em;
+      text-transform: uppercase; color: #61666b; margin: 0 0 8px;
+    }
+    html[data-theme="dark"] .col-title { color: #adb2b8; }
+    .app {
+      background: var(--dsw-alias-bg-base);
+      border: 1px solid var(--dsw-alias-border-l2);
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 10px 30px rgb(15 17 21 / 6%);
+    }
+    .chrome {
+      height: 36px;
+      display: flex; align-items: center; gap: 6px;
+      padding: 0 12px;
+      border-bottom: 1px solid var(--dsw-alias-border-l2);
+      background: var(--dsw-alias-bg-layer-1);
+      color: var(--dsw-alias-label-tertiary);
+      font-size: 12px;
+    }
+    .dots { display: flex; gap: 5px; margin-right: 6px; }
+    .dots i { width: 8px; height: 8px; border-radius: 50%; background: #d4d4d4; display: block; }
+    .sidebar { padding: 8px 8px 12px; }
+    .section {
+      height: 28px; display: flex; align-items: center; justify-content: space-between;
+      padding: 0 6px; color: var(--dsw-alias-label-tertiary); font-size: 12px;
+    }
+    .group {
+      height: 34px; display: flex; align-items: center; gap: 6px;
+      padding: 0 8px; border-radius: 8px; font-size: 13px; font-weight: 600;
+      color: var(--dsw-alias-label-primary);
+    }
+    .group .chev { width: 10px; opacity: .55; }
+    .group .count { margin-left: auto; color: var(--dsw-alias-label-tertiary); font-weight: 500; font-size: 11px; }
+
+    .sessionRow {
+      position: relative;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      gap: 0;
+      padding: 0 8px;
+      border-radius: 8px;
+      cursor: default;
+      user-select: none;
+      overflow: hidden;
+    }
+    .sessionRow.selected,
+    .sessionRow:hover { background: var(--dsw-alias-interactive-bg-hover); }
+    .slot { width: 16px; height: 20px; flex: none; display: inline-flex; align-items: center; justify-content: center; }
+    .title {
+      margin: 0 6px 0 4px;
+      min-width: 0; flex: 1;
+      font-size: 14px; line-height: 20px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .time { flex: none; font-size: 11px; color: var(--dsw-alias-label-tertiary); }
+    .dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--dsw-alias-label-tertiary);
+    }
+    .dot.ongoing { background: var(--dsw-alias-state-business-primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-business-primary) 22%, transparent); }
+    .dot.warning { background: var(--dsw-alias-state-warn-primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-warn-primary) 22%, transparent); }
+    .dot.done { background: var(--dsw-alias-state-success-primary); }
+    .dot.error { background: var(--dsw-alias-state-error-primary); }
+
+    /* Proposed wash */
+    .sessionRow[data-kind] { background-clip: padding-box; }
+    .sessionRow[data-kind]::before {
+      content: "";
+      position: absolute; inset: 0 auto 0 0; width: 3px;
+      border-radius: 8px 0 0 8px;
+    }
+    .sessionRow[data-kind="running"] {
+      background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 12%, transparent);
+    }
+    .sessionRow[data-kind="running"]::before { background: var(--dsw-alias-state-business-primary); }
+    .sessionRow[data-kind="subagent"] {
+      background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 9%, transparent);
+    }
+    .sessionRow[data-kind="subagent"]::before {
+      background: repeating-linear-gradient(
+        180deg,
+        var(--dsw-alias-state-business-primary) 0 5px,
+        transparent 5px 8px
+      );
+    }
+    .sessionRow[data-kind="awaiting"] {
+      background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 14%, transparent);
+    }
+    .sessionRow[data-kind="awaiting"]::before { background: var(--dsw-alias-state-warn-primary); }
+    .sessionRow[data-kind="completed"] {
+      background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 12%, transparent);
+    }
+    .sessionRow[data-kind="completed"]::before { background: var(--dsw-alias-state-success-primary); }
+    .sessionRow[data-kind="error"] {
+      background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 12%, transparent);
+    }
+    .sessionRow[data-kind="error"]::before { background: var(--dsw-alias-state-error-primary); }
+
+    .sessionRow[data-kind].selected,
+    .sessionRow[data-kind]:hover {
+      background:
+        var(--dsw-alias-interactive-bg-hover),
+        color-mix(in srgb, var(--ink, var(--dsw-alias-state-business-primary)) 8%, transparent);
+    }
+    .sessionRow[data-kind="running"].selected,
+    .sessionRow[data-kind="running"]:hover,
+    .sessionRow[data-kind="subagent"].selected,
+    .sessionRow[data-kind="subagent"]:hover { --ink: var(--dsw-alias-state-business-primary); }
+    .sessionRow[data-kind="awaiting"].selected,
+    .sessionRow[data-kind="awaiting"]:hover { --ink: var(--dsw-alias-state-warn-primary); }
+    .sessionRow[data-kind="completed"].selected,
+    .sessionRow[data-kind="completed"]:hover { --ink: var(--dsw-alias-state-success-primary); }
+    .sessionRow[data-kind="error"].selected,
+    .sessionRow[data-kind="error"]:hover { --ink: var(--dsw-alias-state-error-primary); }
+
+    .bar {
+      position: absolute; left: 3px; right: 0; bottom: 0; height: 2px;
+      background: color-mix(in srgb, var(--bar) 22%, transparent);
+      overflow: hidden;
+    }
+    .bar > i {
+      display: block; height: 100%; width: var(--pct, 0%);
+      background: var(--bar);
+      border-radius: 0 1px 0 0;
+    }
+    .sessionRow[data-kind="running"] .bar,
+    .sessionRow[data-kind="subagent"] .bar { --bar: var(--dsw-alias-state-business-primary); }
+    .sessionRow[data-phase="tool"] .bar { --bar: var(--dsw-alias-state-warn-primary); }
+    .sessionRow[data-kind="awaiting"] .bar { --bar: var(--dsw-alias-state-warn-primary); }
+    .sessionRow[data-kind="completed"] .bar { --bar: var(--dsw-alias-state-success-primary); }
+    .sessionRow[data-kind="error"] .bar { --bar: var(--dsw-alias-state-error-primary); }
+    .bar.indet > i {
+      width: 38%;
+      animation: scan 1.6s ease-in-out infinite;
+    }
+    @keyframes scan {
+      0% { transform: translateX(-120%); }
+      100% { transform: translateX(320%); }
+    }
+
+    /* Fill variant */
+    .fill .sessionRow[data-kind="running"] {
+      background: linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--dsw-alias-state-business-primary) 22%, transparent) var(--pct, 0%),
+        color-mix(in srgb, var(--dsw-alias-state-business-primary) 7%, transparent) var(--pct, 0%)
+      );
+    }
+    .fill .sessionRow[data-kind="running"] .bar { display: none; }
+
+    .note {
+      margin-top: 10px; font-size: 12px; line-height: 1.5; color: #61666b;
+    }
+    html[data-theme="dark"] .note { color: #adb2b8; }
+
+    .wide {
+      background: var(--dsw-alias-bg-base);
+      border: 1px solid var(--dsw-alias-border-l2);
+      border-radius: 14px;
+      padding: 14px 16px 16px;
+      box-shadow: 0 10px 30px rgb(15 17 21 / 6%);
+    }
+    .wide h2 { font-size: 14px; margin: 0 0 10px; font-weight: 650; }
+    .matrix { display: grid; gap: 6px; }
+    .caption {
+      display: flex; justify-content: space-between; align-items: baseline;
+      font-size: 11px; color: var(--dsw-alias-label-tertiary); padding: 0 2px;
+    }
+    .searchRow {
+      min-height: 48px; border-radius: 8px; padding: 4px 8px;
+      display: flex; flex-direction: column; justify-content: center;
+      position: relative; overflow: hidden;
+    }
+    .searchRow.selected { background: var(--dsw-alias-interactive-bg-hover); }
+    .searchHead { display: flex; align-items: center; min-width: 0; }
+    .searchTitle { margin-left: 4px; font-size: 14px; line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .searchMeta { margin-left: 20px; display: flex; gap: 6px; font-size: 12px; line-height: 17px; }
+    .ws { color: var(--dsw-alias-label-tertiary); flex: none; }
+    .snip { color: var(--dsw-alias-label-secondary); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .searchRow[data-kind]::before {
+      content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; border-radius: 8px 0 0 8px;
+    }
+    .searchRow[data-kind="running"] {
+      background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 12%, transparent);
+    }
+    .searchRow[data-kind="running"]::before { background: var(--dsw-alias-state-business-primary); }
+    .searchRow[data-kind="awaiting"] {
+      background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 14%, transparent);
+    }
+    .searchRow[data-kind="awaiting"]::before { background: var(--dsw-alias-state-warn-primary); }
+
+    .alt-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+    .mini-label { font-size: 11px; font-weight: 650; color: var(--dsw-alias-label-tertiary); margin-bottom: 6px; }
+    footer.foot {
+      margin-top: 22px; font-size: 12px; color: #61666b; line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <h1>工作区会话行 · 完整原型</h1>
+    <p class="lede">
+      左侧是现在的宿主行（只有状态点）。中间是推荐方案：空闲零改动，其它状态淡底 + 3px 左边线 + 行底 2px 进度条。
+      右侧把同一套样式摊开：选中、子代理、工具阶段、搜索结果、以及「进度当整行底」的备选。
+    </p>
+    <div class="legend">
+      <span class="chip"><i class="swatch" style="background:#4176e6"></i>执行 / 子代理 · 蓝 12%</span>
+      <span class="chip"><i class="swatch" style="background:#f59e0b"></i>待确认 / 工具阶段 · 琥珀 14%</span>
+      <span class="chip"><i class="swatch" style="background:#22c55e"></i>刚完成（未点开）· 绿 12%</span>
+      <span class="chip"><i class="swatch" style="background:#ef4444"></i>出错 · 红 12%</span>
+      <span class="chip"><i class="swatch" style="background:#e5e5e5;border:1px solid #ddd"></i>空闲 · 无底无条</span>
+    </div>
+
+    <div class="grid">
+      <!-- NOW -->
+      <div>
+        <p class="col-title">现在 · 仅状态点</p>
+        <div class="app">
+          <div class="chrome"><span class="dots"><i></i><i></i><i></i></span>工作区</div>
+          <div class="sidebar">
+            <div class="section"><span>会话</span></div>
+            <div class="group"><span class="chev">▾</span>dhs-plugins<span class="count">6</span></div>
+
+            <div class="sessionRow selected">
+              <span class="slot"><span class="dot ongoing"></span></span>
+              <span class="title">调研插件核心实现</span>
+              <span class="time">2min</span>
+            </div>
+            <div class="sessionRow">
+              <span class="slot"><span class="dot warning"></span></span>
+              <span class="title">桌面宠物 OOM</span>
+              <span class="time">now</span>
+            </div>
+            <div class="sessionRow">
+              <span class="slot"><span class="dot ongoing"></span></span>
+              <span class="title">子代理 · 扫 sidebar CSS</span>
+              <span class="time">now</span>
+            </div>
+            <div class="sessionRow">
+              <span class="slot"><span class="dot done"></span></span>
+              <span class="title">会话分组管理</span>
+              <span class="time">5min</span>
+            </div>
+            <div class="sessionRow">
+              <span class="slot"></span>
+              <span class="title">闲置草稿</span>
+              <span class="time">1d</span>
+            </div>
+            <div class="sessionRow">
+              <span class="slot"><span class="dot error"></span></span>
+              <span class="title">失败的导出</span>
+              <span class="time">3h</span>
+            </div>
+          </div>
+        </div>
+        <p class="note">空闲行连点都没有。执行 / 子代理都是同一颗蓝点，扫列表时几乎分不清谁在干活、干到哪了。</p>
+      </div>
+
+      <!-- PROPOSED -->
+      <div>
+        <p class="col-title">推荐 · 淡底 + 底栏</p>
+        <div class="app">
+          <div class="chrome"><span class="dots"><i></i><i></i><i></i></span>工作区</div>
+          <div class="sidebar">
+            <div class="section"><span>会话</span></div>
+            <div class="group"><span class="chev">▾</span>dhs-plugins<span class="count">6</span></div>
+
+            <div class="sessionRow selected" data-kind="running" style="--pct:42%">
+              <span class="slot"><span class="dot ongoing"></span></span>
+              <span class="title">调研插件核心实现</span>
+              <span class="time">42%</span>
+              <span class="bar"><i></i></span>
+            </div>
+            <div class="sessionRow" data-kind="awaiting">
+              <span class="slot"><span class="dot warning"></span></span>
+              <span class="title">桌面宠物 OOM</span>
+              <span class="time">now</span>
+              <span class="bar indet"><i></i></span>
+            </div>
+            <div class="sessionRow" data-kind="subagent" style="--pct:18%">
+              <span class="slot"><span class="dot ongoing"></span></span>
+              <span class="title">子代理 · 扫 sidebar CSS</span>
+              <span class="time">18%</span>
+              <span class="bar"><i></i></span>
+            </div>
+            <div class="sessionRow" data-kind="completed" style="--pct:100%">
+              <span class="slot"><span class="dot done"></span></span>
+              <span class="title">会话分组管理</span>
+              <span class="time">5min</span>
+              <span class="bar"><i></i></span>
+            </div>
+            <div class="sessionRow">
+              <span class="slot"></span>
+              <span class="title">闲置草稿</span>
+              <span class="time">1d</span>
+            </div>
+            <div class="sessionRow" data-kind="error" style="--pct:61%">
+              <span class="slot"><span class="dot error"></span></span>
+              <span class="title">失败的导出</span>
+              <span class="time">3h</span>
+              <span class="bar"><i></i></span>
+            </div>
+          </div>
+        </div>
+        <p class="note">空闲行像素级保持原样。选中的执行行：宿主 hover 底叠在更淡的蓝洗上，左边线仍在，底栏 42%。待确认用琥珀呼吸条，不假装有百分比。</p>
+      </div>
+
+      <!-- DETAILS -->
+      <div class="wide">
+        <h2>同一套规则摊开</h2>
+        <div class="matrix">
+          <div class="caption"><span>未选中 · 各状态</span><span>32px 真实行高</span></div>
+          <div class="sessionRow" data-kind="running" style="--pct:12%">
+            <span class="slot"><span class="dot ongoing"></span></span>
+            <span class="title">开始处理 / 思考 · 12%</span>
+            <span class="time">12%</span>
+            <span class="bar"><i></i></span>
+          </div>
+          <div class="sessionRow" data-kind="running" data-phase="tool" style="--pct:68%">
+            <span class="slot"><span class="dot ongoing"></span></span>
+            <span class="title">执行中 · 工具阶段 68%（底仍蓝，条改琥珀）</span>
+            <span class="time">68%</span>
+            <span class="bar"><i></i></span>
+          </div>
+          <div class="sessionRow" data-kind="running" style="--pct:91%">
+            <span class="slot"><span class="dot ongoing"></span></span>
+            <span class="title">回答中 · 接近完成 91%</span>
+            <span class="time">91%</span>
+            <span class="bar"><i></i></span>
+          </div>
+          <div class="sessionRow" data-kind="running">
+            <span class="slot"><span class="dot ongoing"></span></span>
+            <span class="title">执行中 · 还没有进度数字</span>
+            <span class="time">now</span>
+            <span class="bar indet"><i></i></span>
+          </div>
+          <div class="sessionRow selected" data-kind="awaiting">
+            <span class="slot"><span class="dot warning"></span></span>
+            <span class="title">待确认 · 选中（琥珀底降到约 8%）</span>
+            <span class="time">now</span>
+            <span class="bar indet"><i></i></span>
+          </div>
+          <div class="sessionRow" data-kind="completed" style="--pct:100%">
+            <span class="slot"><span class="dot done"></span></span>
+            <span class="title">刚完成 · 未点开的绿提醒</span>
+            <span class="time">1min</span>
+            <span class="bar"><i></i></span>
+          </div>
+          <div class="sessionRow">
+            <span class="slot"></span>
+            <span class="title">空闲 · 点开完成后回到这里，零装饰</span>
+            <span class="time">1d</span>
+          </div>
+          <div class="sessionRow" data-kind="error" style="--pct:40%">
+            <span class="slot"><span class="dot error"></span></span>
+            <span class="title">出错 · 红底 + 红条停在失败点</span>
+            <span class="time">40%</span>
+            <span class="bar"><i></i></span>
+          </div>
+        </div>
+
+        <div class="alt-row">
+          <div>
+            <div class="mini-label">搜索结果行（可同步）</div>
+            <div class="searchRow selected" data-kind="running">
+              <div class="searchHead">
+                <span class="slot"><span class="dot ongoing"></span></span>
+                <span class="searchTitle">调研插件核心实现</span>
+              </div>
+              <div class="searchMeta"><span class="ws">dhs-plugins</span><span class="snip">对状态进行加个底色，方便一眼看出…</span></div>
+            </div>
+            <div class="searchRow" data-kind="awaiting">
+              <div class="searchHead">
+                <span class="slot"><span class="dot warning"></span></span>
+                <span class="searchTitle">桌面宠物 OOM</span>
+              </div>
+              <div class="searchMeta"><span class="ws">dhs-plugins</span><span class="snip">等待你确认计划…</span></div>
+            </div>
+          </div>
+          <div class="fill">
+            <div class="mini-label">备选 A · 进度当整行底（不推荐默认）</div>
+            <div class="sessionRow selected" data-kind="running" style="--pct:42%">
+              <span class="slot"><span class="dot ongoing"></span></span>
+              <span class="title">42% 处一切换浓度</span>
+              <span class="time">42%</span>
+            </div>
+            <div class="sessionRow" data-kind="running" style="--pct:78%">
+              <span class="slot"><span class="dot ongoing"></span></span>
+              <span class="title">78% · 半截色块更抢</span>
+              <span class="time">78%</span>
+            </div>
+            <p class="note" style="margin-top:8px">扫进度更快，但和选中高亮叠在一起发脏。建议只做底栏。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <footer class="foot">
+      配色全部走 DSW token（business / warn / success / error），浅色截图如上；深色同规则、浓度不变。
+      空闲 = 零 CSS。完成绿底只给「未点开的完成提醒」，不是所有历史会话。
+    </footer>
+  </div>
+</body>
+</html>

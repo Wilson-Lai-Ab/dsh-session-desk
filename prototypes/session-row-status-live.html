@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>会话行着色 · 效果测试</title>
+  <style>
+    :root {
+      --dsw-alias-label-primary: #0f1115;
+      --dsw-alias-label-tertiary: #81858c;
+      --dsw-alias-bg-base: #ffffff;
+      --dsw-alias-bg-layer-1: #f9fafb;
+      --dsw-alias-border-l2: rgb(0 0 0 / 10%);
+      --dsw-alias-interactive-bg-hover: rgb(15 17 21 / 6%);
+      --dsw-alias-state-business-primary: #4176e6;
+      --dsw-alias-state-warn-primary: #f59e0b;
+      --dsw-alias-state-success-primary: #22c55e;
+      --dsw-alias-state-error-primary: #ef4444;
+      font-family: Inter, "PingFang SC", "Hiragino Sans GB", system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #e8eaef; color: #0f1115; }
+    .page { padding: 24px 28px 40px; max-width: 1080px; margin: 0 auto; }
+    h1 { font-size: 20px; margin: 0 0 6px; }
+    .lede { font-size: 13px; color: #61666b; margin: 0 0 18px; line-height: 1.55; }
+    .cols { display: grid; grid-template-columns: 280px 280px 1fr; gap: 16px; align-items: start; }
+    .col-title { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #61666b; margin: 0 0 8px; }
+    .app {
+      background: var(--dsw-alias-bg-base);
+      border: 1px solid var(--dsw-alias-border-l2);
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 10px 30px rgb(15 17 21 / 6%);
+    }
+    .chrome {
+      height: 36px; display: flex; align-items: center; gap: 8px;
+      padding: 0 12px; border-bottom: 1px solid var(--dsw-alias-border-l2);
+      background: var(--dsw-alias-bg-layer-1); color: #81858c; font-size: 12px;
+    }
+    .sidebar { padding: 8px; }
+    .group { height: 34px; display: flex; align-items: center; padding: 0 8px; font-weight: 650; font-size: 13px; }
+    .group span { margin-left: auto; color: #81858c; font-weight: 500; font-size: 11px; }
+    [role="treeitem"] {
+      height: 32px; display: flex; align-items: center; padding: 0 8px; border-radius: 8px; cursor: pointer; user-select: none;
+    }
+    [role="treeitem"]:hover, [role="treeitem"][aria-selected="true"] { background: var(--dsw-alias-interactive-bg-hover); }
+    .slot { width: 16px; height: 20px; flex: none; display: inline-flex; align-items: center; justify-content: center; }
+    .title { margin: 0 6px 0 4px; min-width: 0; flex: 1; font-size: 14px; line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .time { flex: none; font-size: 11px; color: var(--dsw-alias-label-tertiary); }
+    .dot { width: 6px; height: 6px; border-radius: 50%; }
+    .dot.ongoing { background: var(--dsw-alias-state-business-primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-business-primary) 22%, transparent); }
+    .dot.warning { background: var(--dsw-alias-state-warn-primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-warn-primary) 22%, transparent); }
+    .dot.done { background: var(--dsw-alias-state-success-primary); }
+    .dot.error { background: var(--dsw-alias-state-error-primary); }
+    .note { margin-top: 10px; font-size: 12px; color: #61666b; line-height: 1.5; }
+    .log {
+      background: #fff; border: 1px solid var(--dsw-alias-border-l2); border-radius: 14px; padding: 14px 16px;
+      font-size: 13px; line-height: 1.55; min-height: 220px;
+    }
+    .log h2 { font-size: 14px; margin: 0 0 8px; }
+    .log kbd { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; background: #f5f5f5; padding: 1px 5px; border-radius: 4px; }
+    ul { margin: 8px 0 0; padding-left: 18px; }
+    /* ===== production wash CSS (copied from src/client/workspace/row-wash.ts) ===== */
+    [role="treeitem"]:not([aria-expanded])[data-dsd-kind] {
+      position: relative;
+      overflow: hidden;
+      background-clip: padding-box;
+    }
+    [role="treeitem"]:not([aria-expanded])[data-dsd-kind]::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 3px;
+      border-radius: 8px 0 0 8px;
+      pointer-events: none;
+    }
+    [role="treeitem"]:not([aria-expanded])[data-dsd-kind]::after {
+      content: "";
+      position: absolute;
+      left: 3px;
+      bottom: 0;
+      height: 2px;
+      pointer-events: none;
+      background: var(--dsw-alias-state-business-primary);
+      width: var(--dsd-progress, 0%);
+      max-width: calc(100% - 3px);
+      transform-origin: left center;
+    }
+    [role="treeitem"]:not([aria-expanded])[data-dsd-kind="running"] {
+      background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 12%, transparent);
+    }
+    [role="treeitem"]:not([aria-expanded])[data-dsd-kind="running"]::before {
+      background: var(--dsw-alias-state-business-primary);
+    }
+    [role="treeitem"]:not([aria-expanded])[data-dsd-kind="subagent"] {
+      background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 9%, transparent);
+    }
+    [role="treeitem"]:not([aria-expanded])[data-dsd-kind="subagent"]::before {
+      background: repeating-linear-gradient(
+        180deg,
+        var(--dsw-alias-state-business-primary) 0 5px,
+        transparent 5px 8px
+      );
+    }
+    [role="treeitem"]:not([aria-expanded])[data-dsd-kind="awaiting"] {
+      background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 14%, transparent);
+    }
+    [role="treeitem"]:not([aria-expanded])[data-dsd-kind="awaiting"]::before {
+      background: var(--dsw-alias-state-warn-primary);
+    }
+    [role="treeitem"]:not([aria-expanded])[data-dsd-kind="awaiting"]::after {
+      background: var(--dsw-alias-state-warn-primary);
+    }
+    [role="treeitem"]:not([aria-expanded])[data-dsd-kind="completed"] {
+      background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 12%, transparent);
+    }
+    [role="treeitem"]:not([aria-expanded])[data-dsd-kind="completed"]::before {
+      background: var(--dsw-alias-state-success-primary);
+    }
+    [role="treeitem"]:not([aria-expanded])[data-dsd-kind="completed"]::after {
+      background: var(--dsw-alias-state-success-primary);
+      width: 100%;
+    }
+    [role="treeitem"]:not([aria-expanded])[data-dsd-kind="error"] {
+      background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 12%, transparent);
+    }
+    [role="treeitem"]:not([aria-expanded])[data-dsd-kind="error"]::before {
+      background: var(--dsw-alias-state-error-primary);
+    }
+    [role="treeitem"]:not([aria-expanded])[data-dsd-kind="error"]::after {
+      background: var(--dsw-alias-state-error-primary);
+    }
+    [role="treeitem"]:not([aria-expanded])[data-dsd-phase="tool"]::after {
+      background: var(--dsw-alias-state-warn-primary);
+    }
+    [role="treeitem"]:not([aria-expanded])[data-dsd-indet]::after {
+      width: 38%;
+      animation: dsd-row-wash-scan 1.6s ease-in-out infinite;
+    }
+    [role="treeitem"]:not([aria-expanded])[data-dsd-kind][aria-selected="true"],
+    [role="treeitem"]:not([aria-expanded])[data-dsd-kind][aria-selected="true"]:hover {
+      background: var(--dsw-alias-interactive-bg-hover);
+    }
+    [role="treeitem"]:not([aria-expanded])[data-dsd-kind="running"]:hover:not([aria-selected="true"]) {
+      background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 12%, transparent);
+    }
+    [role="treeitem"]:not([aria-expanded])[data-dsd-kind="subagent"]:hover:not([aria-selected="true"]) {
+      background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 9%, transparent);
+    }
+    [role="treeitem"]:not([aria-expanded])[data-dsd-kind="awaiting"]:hover:not([aria-selected="true"]) {
+      background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 14%, transparent);
+    }
+    [role="treeitem"]:not([aria-expanded])[data-dsd-kind="completed"]:hover:not([aria-selected="true"]) {
+      background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 12%, transparent);
+    }
+    [role="treeitem"]:not([aria-expanded])[data-dsd-kind="error"]:hover:not([aria-selected="true"]) {
+      background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 12%, transparent);
+    }
+    @keyframes dsd-row-wash-scan {
+      0% { transform: translateX(-120%); }
+      100% { transform: translateX(260%); }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <h1>会话行着色 · 效果测试</h1>
+    <p class="lede">选中行改回宿主原来的灰色底；状态只留左边线和底栏。未选中的忙碌行继续铺淡底。</p>
+    <div class="cols">
+      <div>
+        <p class="col-title">未选中 · 状态淡底</p>
+        <div class="app" id="before">
+          <div class="chrome">工作区</div>
+          <div class="sidebar">
+            <div class="group" role="treeitem" aria-expanded="true">dhs-plugins<span>6</span></div>
+            <div class="session" role="treeitem" data-kind="running" data-progress="42">
+              <span class="slot"><span class="dot ongoing"></span></span>
+              <span class="title">调研插件核心实现</span>
+              <span class="time">2min</span>
+            </div>
+            <div class="session" role="treeitem" data-kind="awaiting">
+              <span class="slot"><span class="dot warning"></span></span>
+              <span class="title">桌面宠物 OOM</span>
+              <span class="time">now</span>
+            </div>
+            <div class="session" role="treeitem" data-kind="subagent" data-progress="18">
+              <span class="slot"><span class="dot ongoing"></span></span>
+              <span class="title">子代理 · 扫 sidebar CSS</span>
+              <span class="time">now</span>
+            </div>
+            <div class="session" role="treeitem" data-kind="completed">
+              <span class="slot"><span class="dot done"></span></span>
+              <span class="title">会话分组管理</span>
+              <span class="time">5min</span>
+            </div>
+            <div class="session" role="treeitem" data-kind="idle">
+              <span class="slot"></span>
+              <span class="title">闲置草稿</span>
+              <span class="time">1d</span>
+            </div>
+            <div class="session" role="treeitem" data-kind="error" data-progress="61">
+              <span class="slot"><span class="dot error"></span></span>
+              <span class="title">失败的导出</span>
+              <span class="time">3h</span>
+            </div>
+          </div>
+        </div>
+        <p class="note">没选中：蓝/琥珀/绿/红淡底都在。时间仍是 2min。</p>
+      </div>
+      <div>
+        <p class="col-title">选中执行中 · 宿主灰底</p>
+        <div class="app" id="after">
+          <div class="chrome">工作区</div>
+          <div class="sidebar">
+            <div class="group" role="treeitem" aria-expanded="true">dhs-plugins<span>6</span></div>
+            <div class="session" role="treeitem" aria-selected="true" data-kind="running" data-progress="42">
+              <span class="slot"><span class="dot ongoing"></span></span>
+              <span class="title">调研插件核心实现</span>
+              <span class="time">2min</span>
+            </div>
+            <div class="session" role="treeitem" data-kind="awaiting">
+              <span class="slot"><span class="dot warning"></span></span>
+              <span class="title">桌面宠物 OOM</span>
+              <span class="time">now</span>
+            </div>
+            <div class="session" role="treeitem" data-kind="subagent" data-progress="18">
+              <span class="slot"><span class="dot ongoing"></span></span>
+              <span class="title">子代理 · 扫 sidebar CSS</span>
+              <span class="time">now</span>
+            </div>
+            <div class="session" role="treeitem" data-kind="completed">
+              <span class="slot"><span class="dot done"></span></span>
+              <span class="title">会话分组管理</span>
+              <span class="time">5min</span>
+            </div>
+            <div class="session" role="treeitem" data-kind="idle">
+              <span class="slot"></span>
+              <span class="title">闲置草稿</span>
+              <span class="time">1d</span>
+            </div>
+            <div class="session" role="treeitem" data-kind="error" data-progress="61">
+              <span class="slot"><span class="dot error"></span></span>
+              <span class="title">失败的导出</span>
+              <span class="time">3h</span>
+            </div>
+          </div>
+        </div>
+        <p class="note">选中的执行行是宿主灰底，左边线 + 底栏还在，和未选中的淡蓝能分开。</p>
+      </div>
+      <div class="log">
+        <h2>这次测到的行为</h2>
+        <ul>
+          <li>未选中忙碌行：状态淡底。</li>
+          <li>选中行：宿主灰底 <kbd>--dsw-alias-interactive-bg-hover</kbd>，不再叠蓝/琥珀。</li>
+          <li>选中仍保留左边线和底栏进度，时间仍是 <kbd>2min</kbd>。</li>
+          <li>空闲行无底；完成/出错点开后褪回空闲。</li>
+        </ul>
+        <p style="margin:14px 0 0;color:#61666b">刷新本页 GUI 后，真实侧栏走同一套 CSS。若还没着色，硬刷新一次让 client bundle 生效。</p>
+      </div>
+    </div>
+  </div>
+  <script>
+    function paint(root) {
+      root.querySelectorAll('.session').forEach(row => {
+        const kind = row.getAttribute('data-kind') || 'idle'
+        const progress = row.getAttribute('data-progress')
+        ;['data-dsd-kind','data-dsd-indet','data-dsd-phase'].forEach(a => row.removeAttribute(a))
+        row.style.removeProperty('--dsd-progress')
+        if (kind === 'idle') return
+        row.setAttribute('data-dsd-kind', kind)
+        if (progress) row.style.setProperty('--dsd-progress', progress + '%')
+        else row.setAttribute('data-dsd-indet', '')
+      })
+    }
+    paint(document.getElementById('before'))
+    paint(document.getElementById('after'))
+  </script>
+</body>
+</html>

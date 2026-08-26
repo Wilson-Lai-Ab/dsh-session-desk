@@ -82,7 +82,7 @@ export function createDesktopPetHandler(opts: DesktopPetHandlerOptions) {
       // Non-blocking: kick off the Electron download + shell launch in the
       // background and return 202 Accepted. Download progress and the final
       // ready/failed state are exposed via GET /status (downloadState).
-      void opts.controller.spawn(`http://${host}`, opts.token)
+      void opts.controller.spawn(`http://${host}`, opts.token, windowOriginOf(body))
       writeJson(res, 202, { ok: true, active: opts.controller.isActive(), downloading: true })
       return
     }
@@ -127,6 +127,14 @@ export function createDesktopPetHandler(opts: DesktopPetHandlerOptions) {
     }
     writeJson(res, 404, { ok: false, error: 'not found' })
   }
+}
+
+function windowOriginOf(body: Record<string, unknown>): { x: number; y: number } | undefined {
+  const x = body.x
+  const y = body.y
+  if (typeof x !== 'number' || typeof y !== 'number') return undefined
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return undefined
+  return { x, y }
 }
 
 function confirmationToolOf(card: unknown): string | undefined {

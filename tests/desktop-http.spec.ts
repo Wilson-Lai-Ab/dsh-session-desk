@@ -162,6 +162,23 @@ describe('desktop-pet endpoints', () => {
     expect(await statusOf(handler, 'POST', `${PET_DESKTOP_PREFIX}/renderer.js`)).toBe(403)
   })
 
+  it('/spawn forwards the browser pet window origin to the controller', async () => {
+    const spawn = vi.fn(async () => {})
+    const { handler } = handlerWith({
+      controller: {
+        spawn,
+        isActive: () => false,
+        isReady: () => false,
+        markReady: () => {},
+        close: () => {},
+        downloadState: () => ({ stage: 'idle', pct: null }),
+      },
+    })
+    const r = await call(handler, 'POST', `${PET_DESKTOP_PREFIX}/spawn`, { x: 340, y: 264 }, mutationHeaders)
+    expect(r.status).toBe(202)
+    expect(spawn).toHaveBeenCalledWith('http://127.0.0.1:3080', 'tok', { x: 340, y: 264 })
+  })
+
   it('/spawn returns 202 Accepted while the download is still in flight', async () => {
     const { handler, controller } = handlerWith()
     // A gate that never resolves: the handler must return 202 without awaiting it.

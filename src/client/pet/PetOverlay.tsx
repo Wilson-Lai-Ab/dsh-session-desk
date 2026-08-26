@@ -27,7 +27,7 @@ import {
   type FoldedPetRow,
   type PetKind,
 } from './status.ts'
-import { classifyPointerEnd, desktopDragOffset, desktopPointerOverChrome, desktopShouldIgnoreMouse, ignoreMouseChanged, petVideoShouldLoop, petVideoShouldPlay, pointerHasMoved } from './pointer.ts'
+import { classifyPointerEnd, desktopDragOffset, desktopPointerOverChrome, desktopShouldIgnoreMouse, desktopWindowOriginFromBrowserPet, ignoreMouseChanged, petVideoShouldLoop, petVideoShouldPlay, pointerHasMoved } from './pointer.ts'
 import { WhaleMark } from './WhaleMark.tsx'
 import { ApPet } from './ApPet.tsx'
 import { AP_THEME_IDS, apPhaseOf } from './ap-themes.ts'
@@ -420,7 +420,11 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
         if (cancelled) return
         void (async () => {
           try {
-            const res = await fetch(`${PET_DESKTOP_PREFIX}/spawn`, { method: 'POST', headers: CSRF_HEADERS, body: '{}' })
+            const res = await fetch(`${PET_DESKTOP_PREFIX}/spawn`, {
+              method: 'POST',
+              headers: CSRF_HEADERS,
+              body: JSON.stringify(spawnOrigin()),
+            })
             if (!res.ok && !cancelled) setDesktopError(`spawn ${res.status}`)
           } catch {
             /* keep last known state; /status poll surfaces download failures */
@@ -698,6 +702,19 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
   }, [])
+
+  const spawnOrigin = (): { x: number; y: number } => {
+    const sprite = livePos.current
+    const restPos = desktopPetRest(420, 640, size, petHeight)
+    return desktopWindowOriginFromBrowserPet({
+      screenX: window.screenX,
+      screenY: window.screenY,
+      petX: sprite.x,
+      petY: sprite.y,
+      restX: restPos.x,
+      restY: restPos.y,
+    })
+  }
 
   const persistPosition = useCallback((x: number, y: number) => {
     const { w, h } = viewport()
@@ -1173,7 +1190,13 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
               setDesktopError(null)
               setModeMenu(false)
               void props.update?.({ petDesktop: true })
-              if (!inShell) void fetch(`${PET_DESKTOP_PREFIX}/spawn`, { method: 'POST', headers: CSRF_HEADERS, body: '{}' })
+              if (!inShell) {
+                void fetch(`${PET_DESKTOP_PREFIX}/spawn`, {
+                  method: 'POST',
+                  headers: CSRF_HEADERS,
+                  body: JSON.stringify(spawnOrigin()),
+                })
+              }
             }}
           >
             {props.t?.('pet.mode.desktop') ?? '桌面'}
