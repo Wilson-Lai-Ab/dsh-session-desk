@@ -4,6 +4,7 @@
  * the host relative-time label is never replaced.
  */
 import {
+  awaitingFromLiveCards,
   isSubagentRow,
   progressBySession,
   sessionKindFromRow,
@@ -168,14 +169,23 @@ export interface WashPaint {
   phase?: string
 }
 
+export type LiveWashCard = {
+  id?: string
+  title?: string | null
+  pendingInteraction?: string | null
+  view?: { progress?: number; phase?: string; toolName?: string | null }
+}
+
 export function paintsBySession(
   snap: PetListSnapshot | undefined,
   progress: ReadonlyMap<string, number>,
   phases: ReadonlyMap<string, string> = new Map(),
   seen: Set<string> = new Set(),
+  liveCards: readonly LiveWashCard[] = [],
 ): Map<string, WashPaint> {
   const out = new Map<string, WashPaint>()
   if (!snap) return out
+  const awaitingIds = new Set(awaitingFromLiveCards(liveCards).map(row => row.id))
   const current = typeof snap.current === 'string' ? snap.current : undefined
   const rows: PetSessionRow[] = []
   if (snap.byId && typeof snap.byId === 'object') {
@@ -190,7 +200,7 @@ export function paintsBySession(
   for (const row of rows) {
     const id = rowId(row)
     if (!id) continue
-    const petKind = petKindForWash(row)
+    const petKind = awaitingIds.has(id) ? 'awaiting' : petKindForWash(row)
     const isCurrent = id === current
     rememberOpenedTerminal(seen, id, petKind, isCurrent)
     const kind = rowWashKind({
@@ -399,19 +409,19 @@ function phasesBySession(cards: readonly { id?: string; view?: { phase?: string 
 export function startRowWash(opts: {
   list?: unknown
   document?: Document
-  fetchCards?: () => Promise<readonly { id?: string; view?: { progress?: number; phase?: string } }[]>
+  fetchCards?: () => Promise<readonly LiveWashCard[]>
   intervalMs?: number
 }): () => void {
   const doc = opts.document ?? (typeof document === 'undefined' ? undefined : document)
   if (!doc) return () => {}
   adoptRowWashStyles(doc)
-  let cards: readonly { id?: string; view?: { progress?: number; phase?: string } }[] = []
+  let cards: readonly LiveWashCard[] = []
   const seen = new Set<string>()
   const paint = (): void => {
     const snap = readListStore(opts.list)
     const progress = progressBySession(cards)
     const phases = phasesBySession(cards)
-    const paints = paintsBySession(snap, progress, phases, seen)
+    const paints = paintsBySession(snap, progress, phases, seen, cards)
     const query = typeof doc.querySelectorAll === 'function' ? doc.querySelectorAll.bind(doc) : undefined
     if (query === undefined) return
     const nodes = Array.from(query('[role="treeitem"]')) as unknown as Array<WashElement & {

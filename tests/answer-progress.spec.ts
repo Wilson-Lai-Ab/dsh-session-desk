@@ -25,6 +25,19 @@ describe('startTurn', () => {
   })
 })
 
+describe('approval wait', () => {
+  it('keeps the tool phase when approval/asked arrives for a running tool', () => {
+    let s = startTurn({ turn: 1 }, t0)
+    s = applyEvent(s, ev('tool/call', { name: 'write' }), t0)
+    s = applyEvent(s, ev('approval/asked', { id: 'a1', toolName: 'write' }), t0 + 10)
+    expect(s.phase).toBe('tool')
+    expect(s.toolName).toBe('write')
+    s = applyEvent(s, ev('approval/decided', { id: 'a1', outcome: 'approved' }), t0 + 20)
+    expect(s.phase).toBe('tool')
+    expect(s.toolName).toBe('write')
+  })
+})
+
 describe('think progress', () => {
   it('step/start → think; think grows but caps at 10', () => {
     let s = startTurn({ turn: 1 }, t0)

@@ -59,6 +59,7 @@ export function isConfirmationTool(name: string | undefined): boolean {
   const key = (name ?? '').trim().toLowerCase()
   if (key === '') return false
   return key === 'ask_user_question' || key === 'exit_plan_mode'
+    || key === 'approval' || key === 'plan-review' || key === 'question'
     || key.includes('ask_user') || key.includes('permission')
 }
 
@@ -86,10 +87,70 @@ export function aggregatePetKind(kinds: readonly PetKind[]): PetKind {
 }
 
 /** Folded list can miss live work; answer-pet running cards fill that gap. */
-export function petKindFromLive(input: { folded: readonly PetKind[]; liveRunning: number }): PetKind {
+export function petKindFromLive(input: {
+  folded: readonly PetKind[]
+  liveRunning: number
+  liveAwaiting?: number
+}): PetKind {
+  if ((input.liveAwaiting ?? 0) > 0) return 'awaiting'
   const folded = aggregatePetKind(input.folded)
   if (folded !== 'idle') return folded
   return input.liveRunning > 0 ? 'running' : 'idle'
+}
+
+/** Desktop mode hides the in-page pet once the overlay is ready (one pet only). */
+export function hideBrowserPet(input: {
+  petDesktop: boolean
+  desktopReady: boolean
+  kind: PetKind
+}): boolean {
+  return input.petDesktop && input.desktopReady
+}
+
+/** Overlay list can lag; stamp live confirmation cards onto folded rows. */
+export function mergeLiveAwaiting(
+  rows: readonly FoldedPetRow[],
+  awaiting: readonly FoldedPetRow[],
+): FoldedPetRow[] {
+  if (awaiting.length === 0) return rows as FoldedPetRow[]
+  const byId = new Map(awaiting.map(row => [row.id, row] as const))
+  const seen = new Set<string>()
+  const out = rows.map(row => {
+    const live = byId.get(row.id)
+    if (live === undefined) return row
+    seen.add(row.id)
+    return { ...row, kind: 'awaiting' as const, tool: live.tool ?? row.tool }
+  })
+  for (const live of awaiting) {
+    if (seen.has(live.id)) continue
+    out.push({ id: live.id, title: live.title, kind: 'awaiting', tool: live.tool })
+  }
+  return out
+}
+
+/** Live answer-pet cards that are waiting on the user (approval / question / plan). */
+export function awaitingFromLiveCards(cards: readonly {
+  id?: string
+  title?: string | null
+  pendingInteraction?: string | null
+  view?: { toolName?: string | null }
+}[] | undefined): FoldedPetRow[] {
+  if (!cards) return []
+  const out: FoldedPetRow[] = []
+  for (const card of cards) {
+    if (typeof card.id !== 'string' || card.id === '') continue
+    const pending = typeof card.pendingInteraction === 'string' ? card.pendingInteraction.trim() : ''
+    const toolName = typeof card.view?.toolName === 'string' ? card.view.toolName.trim() : ''
+    const tool = pending !== '' ? pending : (isConfirmationTool(toolName) ? toolName : undefined)
+    if (tool === undefined) continue
+    out.push({
+      id: card.id,
+      title: (typeof card.title === 'string' && card.title !== '' ? card.title : card.id),
+      kind: 'awaiting',
+      tool,
+    })
+  }
+  return out
 }
 
 const BUSY: ReadonlySet<PetKind> = new Set(['running', 'awaiting', 'error', 'subagent'])

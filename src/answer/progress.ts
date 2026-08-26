@@ -162,6 +162,13 @@ export function applyEvent(state: ProgressState, event: { type?: string; data?: 
       state.toolProgressBase = null
       break
     }
+    case 'approval/asked': {
+      state.phase = PHASES.TOOL
+      if (typeof data.toolName === 'string' && data.toolName.trim() !== '') {
+        state.toolName = data.toolName
+      }
+      break
+    }
     case 'tool/result': {
       if (state.phase === PHASES.TOOL) state.phase = PHASES.STREAM
       state.toolName = null

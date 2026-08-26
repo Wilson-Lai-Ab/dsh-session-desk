@@ -20,7 +20,11 @@ import {
   foldPetList,
   foldPetRows,
   idlePhraseIndex,
+  awaitingFromLiveCards,
+  hideBrowserPet,
+  isConfirmationTool,
   isSubagentRow,
+  mergeLiveAwaiting,
   petKindOf,
   resolvePetImage,
   sessionKindFromRow,
@@ -140,6 +144,58 @@ describe('petKindFromLive', () => {
     expect(petKindFromLive({ folded: ['idle'], liveRunning: 1 })).toBe('running')
     expect(petKindFromLive({ folded: ['awaiting'], liveRunning: 2 })).toBe('awaiting')
     expect(petKindFromLive({ folded: ['error'], liveRunning: 1 })).toBe('error')
+  })
+
+  it('promotes live confirmation waits over a running or idle list', () => {
+    expect(petKindFromLive({ folded: ['idle'], liveRunning: 1, liveAwaiting: 1 })).toBe('awaiting')
+    expect(petKindFromLive({ folded: ['running'], liveRunning: 2, liveAwaiting: 1 })).toBe('awaiting')
+  })
+})
+
+describe('hideBrowserPet', () => {
+  it('hides the in-page pet whenever desktop mode is ready, including confirmation waits', () => {
+    expect(hideBrowserPet({ petDesktop: true, desktopReady: true, kind: 'running' })).toBe(true)
+    expect(hideBrowserPet({ petDesktop: true, desktopReady: true, kind: 'awaiting' })).toBe(true)
+    expect(hideBrowserPet({ petDesktop: true, desktopReady: true, kind: 'idle' })).toBe(true)
+    expect(hideBrowserPet({ petDesktop: true, desktopReady: false, kind: 'awaiting' })).toBe(false)
+    expect(hideBrowserPet({ petDesktop: false, desktopReady: false, kind: 'running' })).toBe(false)
+  })
+})
+
+describe('isConfirmationTool', () => {
+  it('treats host pending statuses and pause-the-turn tools as confirmation waits', () => {
+    expect(isConfirmationTool('ask_user_question')).toBe(true)
+    expect(isConfirmationTool('exit_plan_mode')).toBe(true)
+    expect(isConfirmationTool('approval')).toBe(true)
+    expect(isConfirmationTool('plan-review')).toBe(true)
+    expect(isConfirmationTool('question')).toBe(true)
+    expect(isConfirmationTool('bash')).toBe(false)
+    expect(isConfirmationTool('write')).toBe(false)
+  })
+})
+
+describe('awaitingFromLiveCards', () => {
+  it('reads pendingInteraction from a live card even when the tool is bash', () => {
+    expect(awaitingFromLiveCards([
+      { id: 's1', title: 'chat', pendingInteraction: 'bash', view: { toolName: 'bash' } },
+      { id: 's2', title: 'work', view: { toolName: 'write' } },
+      { id: 's3', title: 'ask', view: { toolName: 'ask_user_question' } },
+    ])).toEqual([
+      { id: 's1', title: 'chat', kind: 'awaiting', tool: 'bash' },
+      { id: 's3', title: 'ask', kind: 'awaiting', tool: 'ask_user_question' },
+    ])
+  })
+})
+
+describe('mergeLiveAwaiting', () => {
+  it('stamps live confirmation cards onto folded rows so the bubble is awaiting, not running', () => {
+    const merged = mergeLiveAwaiting(
+      [{ id: 's1', title: 'chat', kind: 'running', activity: 'streaming' }],
+      [{ id: 's1', title: 'chat', kind: 'awaiting', tool: 'bash' }],
+    )
+    expect(merged).toEqual([
+      { id: 's1', title: 'chat', kind: 'awaiting', activity: 'streaming', tool: 'bash' },
+    ])
   })
 })
 

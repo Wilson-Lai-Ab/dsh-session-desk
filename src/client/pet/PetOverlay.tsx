@@ -14,10 +14,13 @@ import {
   defaultPetPosition,
   desktopPetRest,
   fitPetSize,
+  awaitingFromLiveCards,
   foldPetList,
   foldedPetSignature,
+  hideBrowserPet,
   idlePhraseIndex,
   IDLE_BROADCAST_HOLD_MS,
+  mergeLiveAwaiting,
   nextIdleBroadcastDelay,
   petKindFromLive,
   progressBySession,
@@ -466,45 +469,13 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
   }, [props.sessions, props.useSessions])
 
   const snapshot = hookedList ?? fallbackList
-  const entries = useStableFoldedRows(useMemo(() => {
+  const folded = useMemo(() => {
     try {
       return foldPetList(snapshot)
     } catch {
       return []
     }
-  }, [snapshot]))
-
-  const watchIds = useMemo(() => {
-    const ids = new Set<string>()
-    if (typeof snapshot?.current === 'string' && snapshot.current !== '') ids.add(snapshot.current)
-    for (const row of entries) {
-      if (row.kind === 'running' || row.kind === 'subagent' || row.kind === 'awaiting') ids.add(row.id)
-    }
-    return [...ids].join('\0')
-  }, [entries, snapshot])
-
-  useEffect(() => {
-    const refresh = props.sessions?.refreshSubagents
-    const setCatalogOpen = props.sessions?.setSubagentCatalogOpen
-    const ids = watchIds === '' ? [] : watchIds.split('\0')
-    for (const id of ids) {
-      try {
-        setCatalogOpen?.(id, true)
-        void refresh?.(id)
-      } catch {
-        /* catalog watch is best-effort */
-      }
-    }
-    return () => {
-      for (const id of ids) {
-        try {
-          setCatalogOpen?.(id, false)
-        } catch {
-          /* ignore */
-        }
-      }
-    }
-  }, [watchIds, props.sessions])
+  }, [snapshot])
 
   const [apSnapshot, setApSnapshot] = useState<AnswerPetSnapshot | null>(null)
   const [cardsOpen, setCardsOpen] = useState(false)
@@ -537,10 +508,48 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
   }, [inShell])
   const liveFromSnap = (snapshot as SessionsSnapshot | undefined)?.answerPet
   const apCards = (inShell ? liveFromSnap : apSnapshot)?.running ?? []
+  const liveAwaiting = useMemo(() => awaitingFromLiveCards(apCards), [apCards])
+  const entries = useStableFoldedRows(useMemo(
+    () => mergeLiveAwaiting(folded, liveAwaiting),
+    [folded, liveAwaiting],
+  ))
   const kind = petKindFromLive({
     folded: entries.map(row => row.kind),
     liveRunning: apCards.length,
+    liveAwaiting: liveAwaiting.length,
   })
+
+  const watchIds = useMemo(() => {
+    const ids = new Set<string>()
+    if (typeof snapshot?.current === 'string' && snapshot.current !== '') ids.add(snapshot.current)
+    for (const row of entries) {
+      if (row.kind === 'running' || row.kind === 'subagent' || row.kind === 'awaiting') ids.add(row.id)
+    }
+    return [...ids].join('\0')
+  }, [entries, snapshot])
+
+  useEffect(() => {
+    const refresh = props.sessions?.refreshSubagents
+    const setCatalogOpen = props.sessions?.setSubagentCatalogOpen
+    const ids = watchIds === '' ? [] : watchIds.split('\0')
+    for (const id of ids) {
+      try {
+        setCatalogOpen?.(id, true)
+        void refresh?.(id)
+      } catch {
+        /* catalog watch is best-effort */
+      }
+    }
+    return () => {
+      for (const id of ids) {
+        try {
+          setCatalogOpen?.(id, false)
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  }, [watchIds, props.sessions])
 
   const [celebrating, setCelebrating] = useState(false)
   const [completedList, setCompletedList] = useState<readonly FoldedPetRow[]>([])
@@ -935,7 +944,7 @@ export function PetOverlay(props: PetOverlayProps): ReactNode {
   if (typeof document === 'undefined') return null
   // Hide the in-page pet only after the desktop shell heartbeats /ready —
   // process-alive is not enough (transparent window + no Dock icon looks gone).
-  if (!inShell && petDesktop && desktopReady) return null
+  if (!inShell && hideBrowserPet({ petDesktop, desktopReady, kind })) return null
 
   return createPortal(
     <div ref={layerRef} className="dsd-pet-layer" data-shell={inShell ? 'true' : undefined} aria-hidden={false}>

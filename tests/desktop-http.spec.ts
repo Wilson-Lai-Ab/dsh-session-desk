@@ -282,6 +282,46 @@ describe('desktop-pet endpoints', () => {
     expect(r.body.answerPet.running).toEqual([{ id: 's1', title: 'chat' }])
   })
 
+  it('GET /snapshot hydrates an open approval/asked from the host session log', async () => {
+    const log = [
+      { type: 'turn/start', data: { turn: 1 } },
+      { type: 'approval/asked', data: { id: 'a1', toolName: 'bash' } },
+    ]
+    const { handler } = handlerWith({
+      sessions: { list: () => [{ id: 's1', title: 'chat', log }] },
+      getAnswerPet: () => ({
+        running: [{ id: 's1', title: 'chat', view: { phase: 'tool', toolName: 'bash' } }],
+        active: true,
+      }),
+    })
+    const r = await call(handler, 'GET', `${PET_DESKTOP_PREFIX}/snapshot?token=tok`)
+    expect(r.body.sessions.items[0].pendingInteraction).toBe('bash')
+    expect(r.body.sessions.items[0].running).toBeUndefined()
+  })
+
+  it('GET /snapshot marks a sandbox approval wait as awaiting even when the tool is bash', async () => {
+    const sessions = {
+      list: () => [{ id: 's1', title: 'chat' }],
+    }
+    const { handler } = handlerWith({
+      sessions,
+      getAnswerPet: () => ({
+        running: [{
+          id: 's1',
+          title: 'chat',
+          view: { phase: 'tool', toolName: 'bash' },
+          pendingInteraction: 'bash',
+        }],
+        active: true,
+      }),
+    })
+    const r = await call(handler, 'GET', `${PET_DESKTOP_PREFIX}/snapshot?token=tok`)
+    expect(r.body.sessions.items).toEqual([
+      { id: 's1', title: 'chat', pendingInteraction: 'bash' },
+    ])
+    expect(r.body.sessions.items[0].running).toBeUndefined()
+  })
+
   it('GET /snapshot marks a confirmation tool as awaiting, not merely running', async () => {
     const sessions = {
       list: () => [{ id: 's1', title: 'chat' }],
@@ -320,9 +360,9 @@ describe('desktop-pet endpoints', () => {
     expect(r.body.sessions.items[0]).toEqual({
       id: 's1',
       title: 'chat',
-      running: true,
       pendingInteraction: 'exit_plan_mode',
     })
+    expect(r.body.sessions.items[0].running).toBeUndefined()
   })
 
   it('GET /events streams a snapshot and unsubscribes when the client closes', async () => {

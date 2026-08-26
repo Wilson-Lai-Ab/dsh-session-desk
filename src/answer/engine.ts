@@ -37,6 +37,7 @@ export const EDGE_TYPES: ReadonlySet<string> = new Set([
   'turn/start', 'step/start', 'tool/call', 'tool/result',
   'tool/code-dispatch-start', 'tool/code-dispatch', 'step/end', 'turn/end',
   'assistant/chunk', 'session/title',
+  'approval/asked', 'approval/decided',
 ])
 
 /** A session edge pushed out when its status changes. */
@@ -54,6 +55,8 @@ export interface AnswerPetRunning {
   title: string | null
   view: ProgressView
   trace: TraceViewItem[]
+  /** Tool (or host status) currently waiting on the user. */
+  pendingInteraction?: string
 }
 
 /** The full live snapshot served to /answer-pet/state. */
@@ -99,10 +102,31 @@ export interface AnswerPetEngine {
 
 const emptyMeta: SessionMeta = { title: null, running: false }
 
+/** Last unmatched `approval/asked` on a host session log (never `events`). */
+export function openApprovalToolFromLog(row: unknown): string | undefined {
+  if (row === null || typeof row !== 'object') return undefined
+  const log = (row as { log?: unknown }).log
+  if (!Array.isArray(log)) return undefined
+  let tool: string | undefined
+  for (const event of log) {
+    if (event === null || typeof event !== 'object') continue
+    const rec = event as { type?: unknown; data?: unknown }
+    if (rec.type === 'approval/asked') {
+      const data = rec.data !== null && typeof rec.data === 'object' ? rec.data as { toolName?: unknown } : {}
+      const next = typeof data.toolName === 'string' ? data.toolName.trim() : ''
+      if (next !== '') tool = next
+    } else if (rec.type === 'approval/decided') {
+      tool = undefined
+    }
+  }
+  return tool
+}
+
 export function createAnswerPetEngine(opts: AnswerPetEngineOptions): AnswerPetEngine {
   const sessions = new Map<string, ProgressState>()
   const metas = new Map<string, SessionMeta>()
   const traces = new Map<string, TraceState>()
+  const pending = new Map<string, string>()
   let lastActiveId: string | null = null
   let lastActiveAt = 0
 
@@ -163,6 +187,11 @@ export function createAnswerPetEngine(opts: AnswerPetEngineOptions): AnswerPetEn
       if (meta === undefined) {
         meta = { title: null, running: false }
         metas.set(id, meta)
+        const wait = openApprovalToolFromLog(session)
+        if (wait !== undefined) {
+          pending.set(id, wait)
+          meta.running = true
+        }
       }
 
       let trace = traces.get(id)
@@ -178,6 +207,7 @@ export function createAnswerPetEngine(opts: AnswerPetEngineOptions): AnswerPetEn
 
       if (eventType === 'turn/start') {
         meta.running = true
+        pending.delete(id)
         const data = (eventRec.data ?? {}) as { turn?: unknown }
         const fresh = startTurn(data, eventTime)
         trace = startTraceTurn(data, eventTime)
@@ -188,8 +218,17 @@ export function createAnswerPetEngine(opts: AnswerPetEngineOptions): AnswerPetEn
       }
       if (eventType === 'turn/end') {
         meta.running = false
+        pending.delete(id)
       } else if (eventType === 'session/title' && typeof (eventRec.data as Record<string, unknown> | undefined)?.title === 'string') {
         meta.title = (eventRec.data as { title: string }).title
+      } else if (eventType === 'approval/asked') {
+        const data = eventRec.data !== null && typeof eventRec.data === 'object'
+          ? eventRec.data as { toolName?: unknown }
+          : {}
+        const tool = typeof data.toolName === 'string' ? data.toolName.trim() : ''
+        if (tool !== '') pending.set(id, tool)
+      } else if (eventType === 'approval/decided' || eventType === 'tool/result') {
+        pending.delete(id)
       }
 
       const before = state.phase
@@ -201,7 +240,7 @@ export function createAnswerPetEngine(opts: AnswerPetEngineOptions): AnswerPetEn
       }) as { type?: string; data?: Record<string, unknown> }
       applyEvent(state, narrow(), eventTime)
       applyTraceEvent(trace, narrow(), eventTime)
-      if (state.phase !== before || eventType === 'assistant/chunk') {
+      if (state.phase !== before || eventType === 'assistant/chunk' || eventType === 'approval/asked' || eventType === 'approval/decided') {
         // Route through touch so the active-id follows the busiest session.
         touch(id, state, meta)
       }
@@ -217,11 +256,13 @@ export function createAnswerPetEngine(opts: AnswerPetEngineOptions): AnswerPetEn
     for (const [id, state] of sessions) {
       const meta = metas.get(id) ?? emptyMeta
       if (meta.running !== true) continue
+      const wait = pending.get(id)
       out.push({
         id,
         title: meta.title,
         view: deriveView(state, now),
         trace: deriveTrace(traces.get(id) ?? initialTraceState(), now),
+        ...(wait !== undefined ? { pendingInteraction: wait } : {}),
       })
     }
     return out

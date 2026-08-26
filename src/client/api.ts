@@ -118,6 +118,8 @@ export interface AnswerStatusCard {
     endReason?: string | null
     textSnippet?: string
   }
+  /** Tool (or host status) currently waiting on the user. */
+  pendingInteraction?: string
   trace: Array<{
     id: string
     kind: 'phase' | 'tool'

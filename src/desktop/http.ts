@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import type { SessionDeskSettings } from '../shared.ts'
 import type { DesktopPetController } from './lifecycle.ts'
 import { isConfirmationTool } from '../client/pet/status.ts'
+import { openApprovalToolFromLog } from '../answer/engine.ts'
 
 export const PET_DESKTOP_PREFIX = '/session-desk/pet-desktop'
 
@@ -173,8 +174,14 @@ function desktopSnapshot(opts: DesktopPetHandlerOptions) {
       const folded = cachedTitleFromLog(id, row)
       if (folded !== undefined) projected.title = folded
     }
-    if (id !== undefined && awaitingById.has(id)) {
-      const next = { ...projected, pendingInteraction: projected.pendingInteraction ?? awaitingById.get(id) }
+    const wait = (id !== undefined ? awaitingById.get(id) : undefined)
+      ?? (typeof projected.pendingInteraction === 'string' ? projected.pendingInteraction : undefined)
+      ?? openApprovalToolFromLog(row)
+    if (id !== undefined && wait !== undefined && wait !== '') {
+      const next: Record<string, unknown> = {
+        ...projected,
+        pendingInteraction: projected.pendingInteraction ?? wait,
+      }
       delete next.running
       return next
     }

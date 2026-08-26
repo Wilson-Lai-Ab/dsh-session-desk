@@ -71,6 +71,40 @@ describe('answer-pet engine', () => {
     expect(snap.view.progress).toBeGreaterThan(0)
   })
 
+  it('hydrates an open approval/asked from the session log when attaching mid-turn', () => {
+    const log: Record<string, unknown>[] = [
+      { type: 'turn/start', data: { turn: 1 }, time: 10_000 },
+      { type: 'tool/call', data: { name: 'bash', callId: 'c1' }, time: 10_100 },
+      { type: 'approval/asked', data: { id: 'a1', toolName: 'bash' }, time: 10_200 },
+    ]
+    const live = { id: 'main', title: '改文件', log, events: log }
+    let handler: ((session: unknown, event: unknown) => void) | null = null
+    const engine = createAnswerPetEngine({
+      on: (h) => {
+        handler = h
+        return () => { handler = null }
+      },
+      sessions: { get: (id: string) => (id === 'main' ? live : undefined) },
+      now: () => 10_300,
+    })
+    handler?.(live, { type: 'assistant/chunk', data: { chunk: { type: 'text-delta', text: 'x' } }, time: 10_300 })
+    expect(engine.snapshot(10_400).running[0]?.pendingInteraction).toBe('bash')
+  })
+
+  it('stamps approval/asked onto the running card as a confirmation wait', () => {
+    const { engine, emit } = mount()
+    emit('main', { type: 'session/title', data: { title: '改文件' }, time: 10_000 })
+    emit('main', { type: 'turn/start', data: { turn: 1 }, time: 10_000 })
+    emit('main', { type: 'tool/call', data: { name: 'bash', callId: 'c1' }, time: 10_100 })
+    emit('main', { type: 'approval/asked', data: { id: 'a1', toolName: 'bash' }, time: 10_200 })
+    const during = engine.snapshot(10_300)
+    expect(during.running[0]?.pendingInteraction).toBe('bash')
+    expect(during.view.toolName).toBe('bash')
+    emit('main', { type: 'approval/decided', data: { id: 'a1', outcome: 'approved' }, time: 10_400 })
+    const after = engine.snapshot(10_500)
+    expect(after.running[0]?.pendingInteraction).toBeUndefined()
+  })
+
   it('runs a tool phase and records toolCount + trajectory', () => {
     const { engine, emit } = mount()
     emit('main', { type: 'turn/start', data: { turn: 1 }, time: 10_000 })

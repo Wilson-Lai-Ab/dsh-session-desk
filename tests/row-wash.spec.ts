@@ -150,6 +150,20 @@ describe('matchSessionRows', () => {
 })
 
 describe('paintsBySession', () => {
+  it('paints awaiting from a live confirmation card even when the list row is only running', () => {
+    const paints = paintsBySession(
+      {
+        ids: ['s1'],
+        byId: { s1: { id: 's1', title: 'chat', running: true } },
+      },
+      new Map(),
+      new Map([['s1', 'tool']]),
+      new Set(),
+      [{ id: 's1', pendingInteraction: 'bash', view: { phase: 'tool', toolName: 'bash' } }],
+    )
+    expect(paints.get('s1')?.kind).toBe('awaiting')
+  })
+
   it('clears a completed wash once the session is current and keeps it off afterwards', () => {
     const seen = new Set<string>()
     const first = paintsBySession({
