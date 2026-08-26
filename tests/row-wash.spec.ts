@@ -124,6 +124,24 @@ describe('matchSessionRows', () => {
     ])
   })
 
+  it('binds the selected tree row to the current session even when titles differ', () => {
+    const matched = matchSessionRows(
+      [
+        { title: '在测试下 2min', selected: true },
+        { title: '闲置草稿 1d', selected: false },
+      ],
+      [
+        { id: 'current', title: '在测试下' },
+        { id: 'b', title: '闲置草稿' },
+      ],
+      'current',
+    )
+    expect(matched).toEqual([
+      { index: 0, id: 'current' },
+      { index: 1, id: 'b' },
+    ])
+  })
+
   it('skips workspace group rows that expose aria-expanded', () => {
     expect(isSessionTreeRow(el({ expanded: 'true' }))).toBe(false)
     expect(isSessionTreeRow(el({ expanded: 'false' }))).toBe(false)

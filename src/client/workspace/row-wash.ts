@@ -80,6 +80,12 @@ export function isSessionTreeRow(node: { getAttribute?(name: string): string | n
   return expanded === null || expanded === undefined || expanded === ''
 }
 
+const TIME_SUFFIX = /(?:\s+(?:刚刚|now|\d+\s*(?:分钟|小时|天|个月|年|min|h|d|mo|y)(?:\s*ago)?|just now))+$/i
+
+export function normalizeRowTitle(raw: string): string {
+  return raw.replace(/\s+/g, ' ').trim().replace(TIME_SUFFIX, '').trim()
+}
+
 export function matchSessionRows(
   views: readonly TreeRowView[],
   sessions: readonly SessionTitleRow[],
@@ -87,7 +93,7 @@ export function matchSessionRows(
 ): Array<{ index: number; id: string }> {
   const byTitle = new Map<string, SessionTitleRow[]>()
   for (const session of sessions) {
-    const key = session.title.trim()
+    const key = normalizeRowTitle(session.title)
     if (key === '') continue
     const list = byTitle.get(key) ?? []
     list.push(session)
@@ -96,11 +102,14 @@ export function matchSessionRows(
   const used = new Set<string>()
   const out: Array<{ index: number; id: string }> = []
   views.forEach((view, index) => {
-    const candidates = (byTitle.get(view.title.trim()) ?? []).filter(row => !used.has(row.id))
+    if (view.selected && currentId && !used.has(currentId) && sessions.some(row => row.id === currentId)) {
+      used.add(currentId)
+      out.push({ index, id: currentId })
+      return
+    }
+    const candidates = (byTitle.get(normalizeRowTitle(view.title)) ?? []).filter(row => !used.has(row.id))
     if (candidates.length === 0) return
-    const picked = view.selected && currentId
-      ? candidates.find(row => row.id === currentId) ?? candidates[0]
-      : candidates[0]
+    const picked = candidates[0]
     if (!picked) return
     used.add(picked.id)
     out.push({ index, id: picked.id })
@@ -133,7 +142,7 @@ export function applyRowWash(el: WashElement, input: {
 export function extractRowTitle(node: { querySelector: (sel: string) => { textContent: string | null } | null; textContent?: string | null }): string {
   const titled = node.querySelector('[class*="title"]')
   const raw = titled?.textContent ?? node.textContent ?? ''
-  return raw.replace(/\s+/g, ' ').trim()
+  return normalizeRowTitle(raw)
 }
 
 function rowId(row: PetSessionRow): string | undefined {
@@ -144,7 +153,7 @@ function rowId(row: PetSessionRow): string | undefined {
 
 function displayTitle(row: PetSessionRow, id: string): string {
   const title = row.displayTitle || row.title
-  return typeof title === 'string' && title.trim() !== '' ? title.trim() : id
+  return typeof title === 'string' && title.trim() !== '' ? normalizeRowTitle(title) : id
 }
 
 function petKindForWash(row: PetSessionRow): PetKind {
